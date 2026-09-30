@@ -406,14 +406,15 @@ async function prep(file,{invert=false,angle=0}={}){
 let ocrWorker=null;
 async function ocrPass(blob,label){
   if(!window.Tesseract) throw {code:'no_ocr'};
-  if(!ocrWorker){ stage('Завантажую розпізнавання тексту (лише перший раз)…'); ocrWorker=await Tesseract.createWorker('eng'); }
+  if(!ocrWorker){ stage('Завантажую розпізнавання тексту (лише перший раз)…'); ocrWorker=await Tesseract.createWorker('eng'); await ocrWorker.setParameters({tessedit_pageseg_mode:'6'}); }
   stage(label);
   const {data}=await ocrWorker.recognize(blob);
   return data.text||'';
 }
 /* For a VIN: try several versions of the photo until a real VIN is found. */
 async function ocrVin(file){
-  const tries=[[{},'Розпізнаю текст (1 з 4)…'],[{invert:true},'Розпізнаю світлий текст на темному (2 з 4)…'],[{invert:true,angle:-8},'Пробую з поворотом (3 з 4)…'],[{invert:true,angle:8},'Пробую з поворотом (4 з 4)…'],[{angle:-8},'Ще одна спроба…'],[{angle:8},'Остання спроба…']];
+  const T=[{},{angle:-90},{angle:90},{invert:true},{invert:true,angle:-90},{invert:true,angle:90},{invert:true,angle:-8},{invert:true,angle:8},{angle:-8},{angle:8}];
+  const tries=T.map((o,i)=>[o,`Розпізнаю текст (${i+1} з ${T.length})…`]);
   for(const [o,label] of tries){ const v=vinFromText(await ocrPass(await prep(file,o),label)); if(v) return v; }
   return null;
 }
@@ -427,6 +428,26 @@ function pickCode(text, file, name){
   <div class="filters">${toks.map(t=>`<button class="chip pn" data-t="${esc(t)}">${esc(t)}</button>`).join('')}</div>`;
   $('#x').onclick=closeSheet; $('#scrim').hidden=false;
   S.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{ closeSheet(); foundCode(b.dataset.t, file, name); });
+}
+/* Barcode from a still photo: try the photo as is and turned 90° both ways (stickers are often shot sideways). */
+async function rotatedUrl(file, angle){
+  const bmp=await createImageBitmap(file); const k=Math.min(1,1800/Math.max(bmp.width,bmp.height));
+  const w=Math.round(bmp.width*k), h=Math.round(bmp.height*k), side=angle%180!==0;
+  const c=document.createElement('canvas'); c.width=side?h:w; c.height=side?w:h; const x=c.getContext('2d');
+  x.translate(c.width/2,c.height/2); x.rotate(angle*Math.PI/180); x.drawImage(bmp,-w/2,-h/2,w,h);
+  return URL.createObjectURL(await new Promise(r=>c.toBlob(r,'image/jpeg',0.92)));
+}
+async function barcodeFromPhoto(file, isVin){
+  const ok=t=>t && (!isVin || asVin(t));
+  try{ if('BarcodeDetector' in window){ const r=await withTimeout(new BarcodeDetector().detect(await createImageBitmap(file)),5000); const hit=r.find(x=>ok(x.rawValue)); if(hit) return hit.rawValue; } }catch(_){}
+  if(!window.ZXing) return null;
+  const hints=new Map(); hints.set(ZXing.DecodeHintType.TRY_HARDER,true);
+  for(const a of [0,90,270]){
+    let url=null;
+    try{ url=await rotatedUrl(file,a); const r=await withTimeout(new ZXing.BrowserMultiFormatReader(hints).decodeFromImageUrl(url),7000); if(ok(r.getText())) return r.getText(); }catch(_){}
+    finally{ if(url) URL.revokeObjectURL(url); }
+  }
+  return null;
 }
 /* Photo reading through the site's own server function (Claude vision). Returns null when unavailable. */
 let aiOff=false;
@@ -453,15 +474,12 @@ $('#scanFile').onchange=async e=>{
   if(isVin) scanMode='vin';
   let code=null;
   stage('Шукаю штрихкод…');
-  const url=URL.createObjectURL(f);
-  try{ if('BarcodeDetector' in window){ const r=await withTimeout(new BarcodeDetector().detect(await createImageBitmap(f)),5000); const hit=r.find(x=>!isVin||asVin(x.rawValue)); if(hit) code=hit.rawValue; } }catch(_){}
-  if(!code && window.ZXing){ try{ const r=await withTimeout(new ZXing.BrowserMultiFormatReader().decodeFromImageUrl(url),6000); if(!isVin||asVin(r.getText())) code=r.getText(); }catch(_){} }
-  URL.revokeObjectURL(url);
+  code=await barcodeFromPhoto(f, isVin);
   let text='', vinOcr=null, ai=null;
-  if(!code){ stage('Читаю фото через ШІ…'); ai=await aiRead(f, isVin?'vin':'part'); }
+  if(!code && !aiOff){ stage('Читаю фото через ШІ…'); ai=await aiRead(f, isVin?'vin':'part'); }
   if(!code && isVin && ai && ai.vin) vinOcr=ai.vin;
   if(!code && !isVin && ai && ai.codes && ai.codes.length){ scanMode='part'; if(ai.codes.length===1){ foundCode(ai.codes[0], f, ai.name); } else pickCode(ai.codes.join('\n'), f, ai.name); return; }
-  if(!code && !vinOcr){ try{ if(isVin) vinOcr=await withTimeout(ocrVin(f),150000); else text=await withTimeout(ocr(f),90000); }catch(err){} }
+  if(!code && !vinOcr){ try{ if(isVin) vinOcr=await withTimeout(ocrVin(f),240000); else text=await withTimeout(ocr(f),90000); }catch(err){} }
   scanMode='part';
   if(isVin){
     const v=code?asVin(code):vinOcr;
