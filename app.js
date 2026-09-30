@@ -371,20 +371,53 @@ function openLive(mode){
 
 /* ---------- Photo: barcode, then text recognition on the device ---------- */
 const SWAP={L:'1',S:'5','5':'S',B:'8','8':'B',Z:'2','2':'Z',G:'6','6':'G',T:'7','7':'T',A:'4','4':'A',D:'0','0':'D',U:'V',V:'U'};
+const YEARCH='ABCDEFGHJKLMNPRSTVWXY123456789';
+/* A real VIN: valid check digit, valid year character, last 4 characters digits,
+   and a known manufacturer code or a valid country character. */
+function plausibleVin(v){
+  if(!v||v.length!==17||!vinCheck(v)) return false;
+  if(!YEARCH.includes(v[9])) return false;
+  if(!/^\d{4}$/.test(v.slice(13))) return false;
+  return !!(makeOf(v)||REGION[v[0]]);
+}
 function vinFromText(text){
-  const lines=String(text||'').toUpperCase().split(/\n/).map(l=>l.replace(/[^A-Z0-9]/g,''));
+  const lines=String(text||'').toUpperCase().split(/\n/).map(l=>cleanVin(l.replace(/[^A-Z0-9]/g,'')));
   const cands=[];
-  for(const l of [...lines, lines.join('')]){ const c=cleanVin(l); for(let i=0;i+17<=c.length;i++) cands.push(c.slice(i,i+17)); }
-  for(const c of cands) if(vinCheck(c)) return c;
-  for(const c of cands){ for(let i=0;i<17;i++){ const alt=SWAP[c[i]]; if(!alt) continue; if((i>=12||i===8)&&/[A-Z]/.test(alt)) continue; const t=c.slice(0,i)+alt+c.slice(i+1); if(vinCheck(t)) return t; } }
+  for(const c of lines) for(let i=0;i+17<=c.length;i++) cands.push(c.slice(i,i+17));
+  for(const c of cands) if(plausibleVin(c)) return c;
+  for(const c of cands){ for(let i=0;i<17;i++){ const alt=SWAP[c[i]]; if(!alt) continue; if((i>=12||i===8)&&/[A-Z]/.test(alt)) continue; const t=c.slice(0,i)+alt+c.slice(i+1); if(plausibleVin(t)) return t; } }
   return null;
 }
-async function ocr(file){
+/* Prepare the photo for text recognition: grayscale, stretch contrast, optionally invert and rotate. */
+async function prep(file,{invert=false,angle=0}={}){
+  const bmp=await createImageBitmap(file); const k=Math.min(1,2000/Math.max(bmp.width,bmp.height));
+  const w=Math.round(bmp.width*k), h=Math.round(bmp.height*k), r=angle*Math.PI/180;
+  const W=Math.round(Math.abs(w*Math.cos(r))+Math.abs(h*Math.sin(r))), H=Math.round(Math.abs(w*Math.sin(r))+Math.abs(h*Math.cos(r)));
+  const c=document.createElement('canvas'); c.width=W; c.height=H; const x=c.getContext('2d');
+  x.fillStyle=invert?'#000':'#fff'; x.fillRect(0,0,W,H); x.translate(W/2,H/2); x.rotate(r); x.drawImage(bmp,-w/2,-h/2,w,h);
+  const d=x.getImageData(0,0,W,H), p=d.data, hist=new Uint32Array(256);
+  for(let i=0;i<p.length;i+=4){ const g=(p[i]*.299+p[i+1]*.587+p[i+2]*.114)|0; p[i]=g; hist[g]++; }
+  const n=p.length/4; let lo=0,hi=255,acc=0; while(lo<255&&(acc+=hist[lo])<n*.02) lo++; acc=0; while(hi>0&&(acc+=hist[hi])<n*.02) hi--;
+  const sc=255/Math.max(1,hi-lo);
+  for(let i=0;i<p.length;i+=4){ let g=Math.max(0,Math.min(255,(p[i]-lo)*sc)); if(invert) g=255-g; p[i]=p[i+1]=p[i+2]=g; }
+  x.setTransform(1,0,0,1,0,0); x.putImageData(d,0,0);
+  return await new Promise(res=>c.toBlob(res,'image/png'));
+}
+let ocrWorker=null;
+async function ocrPass(blob,label){
   if(!window.Tesseract) throw {code:'no_ocr'};
-  const img=await compress(file);
-  const {data}=await Tesseract.recognize(img,'eng',{logger:m=>{ if(m.status==='recognizing text') stage(`Розпізнаю текст… ${Math.round(m.progress*100)}%`); else if(/load/.test(m.status)) stage('Завантажую розпізнавання тексту (лише перший раз)…'); }});
+  if(!ocrWorker){ stage('Завантажую розпізнавання тексту (лише перший раз)…'); ocrWorker=await Tesseract.createWorker('eng'); }
+  stage(label);
+  const {data}=await ocrWorker.recognize(blob);
   return data.text||'';
 }
+/* For a VIN: try several versions of the photo until a real VIN is found. */
+async function ocrVin(file){
+  const tries=[[{},'Розпізнаю текст (1 з 4)…'],[{invert:true},'Розпізнаю світлий текст на темному (2 з 4)…'],[{invert:true,angle:-8},'Пробую з поворотом (3 з 4)…'],[{invert:true,angle:8},'Пробую з поворотом (4 з 4)…'],[{angle:-8},'Ще одна спроба…'],[{angle:8},'Остання спроба…']];
+  for(const [o,label] of tries){ const v=vinFromText(await ocrPass(await prep(file,o),label)); if(v) return v; }
+  return null;
+}
+async function ocr(file){ return ocrPass(await prep(file),'Розпізнаю текст…'); }
 function pickCode(text, file){
   const toks=[...new Set(String(text).toUpperCase().split(/[\s,;:]+/).map(t=>t.replace(/[^A-Z0-9\-]/g,'')).filter(t=>t.length>=5&&t.length<=20&&/\d/.test(t)))].slice(0,12);
   if(!toks.length){ toast('На фото не знайшов номера. Введіть вручну.'); $('#q').focus(); return; }
@@ -405,12 +438,12 @@ $('#scanFile').onchange=async e=>{
   try{ if('BarcodeDetector' in window){ const r=await withTimeout(new BarcodeDetector().detect(await createImageBitmap(f)),5000); const hit=r.find(x=>!isVin||asVin(x.rawValue)); if(hit) code=hit.rawValue; } }catch(_){}
   if(!code && window.ZXing){ try{ const r=await withTimeout(new ZXing.BrowserMultiFormatReader().decodeFromImageUrl(url),6000); if(!isVin||asVin(r.getText())) code=r.getText(); }catch(_){} }
   URL.revokeObjectURL(url);
-  let text='';
-  if(!code){ try{ text=await withTimeout(ocr(f),90000); }catch(err){ text=''; } }
+  let text='', vinOcr=null;
+  if(!code){ try{ if(isVin) vinOcr=await withTimeout(ocrVin(f),150000); else text=await withTimeout(ocr(f),90000); }catch(err){} }
   scanMode='part';
   if(isVin){
-    const v=code?asVin(code):vinFromText(text);
-    if(!v){ const msg='VIN на фото не знайшов. Сфотографуйте ближче, рівно і без відблиску, або введіть вручну.'; const r=$('#vres'); if(r) r.innerHTML=`<p class="note" style="color:var(--warn)">${esc(msg)}</p>`; else toast(msg); return; }
+    const v=code?asVin(code):vinOcr;
+    if(!v){ const msg='Не зміг надійно прочитати VIN з цього фото. Для наклейки на дверях краще «Сканувати VIN камерою» — вона читає штрихкод. Або введіть VIN вручну.'; const r=$('#vres'); if(r) r.innerHTML=`<p class="note" style="color:var(--warn)">${esc(msg)}</p>`; else toast(msg); return; }
     if($('#vin')) { $('#vin').value=v; runVin(v); } else openVin(v);
     return;
   }
@@ -423,7 +456,9 @@ const titleCase=s=>String(s||'').toLowerCase().replace(/(^|[\s\-\/])([a-z])/g,(m
 async function askVin(c){
   try{
     const r=await withTimeout(fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/${encodeURIComponent(c.vin)}?format=json`),20000);
-    const x=((await r.json()).Results||[])[0]||{};
+    const raw=((await r.json()).Results||[])[0]||{}; const x={};
+    for(const k in raw){ const v=String(raw[k]??'').trim(); if(v && !/^not applicable$/i.test(v)) x[k]=v; }
+    if(/^[1-9]/.test(x.ErrorCode||'') && !x.Model) return {err:'База NHTSA не впізнала цей VIN — перевірте, чи правильно він прочитаний.'};
     if(!x.Make && !x.Model) return {err:'У базі NHTSA цього VIN немає (буває з авто не для ринку США). Впишіть модель і двигун вручну.'};
     const cyl=+x.EngineCylinders||0, conf=String(x.EngineConfiguration||'');
     const layout=cyl?(/V/i.test(conf)?'V':/flat|boxer|horizontal/i.test(conf)?'H':'I')+cyl:'';
