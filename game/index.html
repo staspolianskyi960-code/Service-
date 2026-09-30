@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Легенди Двох Кланів</title>
+<meta name="theme-color" content="#120d1c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Philosopher:wght@400;700&family=Ruslan+Display&display=swap">
+<style>
+:root{
+  --bg:#120d1c; --panel:rgba(22,16,32,.92); --panel2:#231a33; --line:#5a4630; --gold:#e8c170; --gold2:#b8893a;
+  --ink:#efe6d6; --muted:#a898b8; --hp:#d6423a; --mp:#3f7fe0; --xp:#c9a13a; --good:#6fd08a;
+  --light:#3b6fd1; --dark:#5fbf6a;
+  --f:"Philosopher",Georgia,serif; --f-title:"Ruslan Display","Philosopher",serif;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font-family:var(--f);
+  touch-action:none;-webkit-user-select:none;user-select:none;overscroll-behavior:none}
+[hidden]{display:none!important}
+canvas#c{position:fixed;left:0;top:0;width:100%;height:100%;display:block}
+button{font-family:var(--f);cursor:pointer}
+
+/* ---------- menus ---------- */
+.screen{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:max(20px,env(safe-area-inset-top)) 16px max(20px,env(safe-area-inset-bottom));
+  background:radial-gradient(ellipse at center,rgba(18,13,28,.35),rgba(10,6,16,.88) 75%);overflow-y:auto;z-index:20}
+.logo{font-family:var(--f-title);font-size:clamp(30px,8vw,56px);line-height:1.05;text-align:center;color:var(--gold);
+  text-shadow:0 2px 0 #5b3a12,0 0 24px rgba(232,193,112,.35);margin:0 0 6px}
+.sub{color:var(--muted);text-align:center;margin:0 0 26px;font-size:16px}
+h2{font-family:var(--f-title);font-weight:400;color:var(--gold);margin:0 0 18px;text-align:center;font-size:clamp(22px,5.5vw,34px)}
+.btn{display:block;width:min(320px,100%);margin:8px auto;padding:14px 18px;font-size:18px;font-weight:700;color:#2a1a06;
+  background:linear-gradient(#f3d58c,#c9963f);border:2px solid #6b4817;border-radius:10px;box-shadow:0 3px 0 #5b3a12,inset 0 1px 0 #fff3c8}
+.btn:active{transform:translateY(2px);box-shadow:0 1px 0 #5b3a12}
+.btn.ghost{background:rgba(35,26,51,.9);color:var(--ink);border-color:var(--line);box-shadow:0 3px 0 #000}
+.btn small{display:block;font-weight:400;font-size:13px;opacity:.8;margin-top:2px}
+.cards{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;width:100%;max-width:760px}
+.card{flex:1 1 240px;max-width:340px;background:var(--panel);border:2px solid var(--line);border-radius:14px;padding:14px;text-align:center;
+  cursor:pointer;transition:transform .12s,border-color .12s}
+.card:hover,.card:focus-visible{border-color:var(--gold);transform:translateY(-2px)}
+.card h3{margin:6px 0 4px;font-size:22px;color:var(--gold)}
+.card p{margin:4px 0;color:var(--muted);font-size:14px;line-height:1.35}
+.card canvas{width:120px;height:120px;image-rendering:pixelated}
+.card .skills{display:flex;justify-content:center;gap:6px;margin-top:8px;font-size:20px}
+.card .stats{display:flex;justify-content:center;gap:10px;font-size:13px;margin-top:6px;color:var(--ink)}
+.card.light{box-shadow:0 0 0 1px rgba(59,111,209,.4),0 0 24px rgba(59,111,209,.18)}
+.card.dark{box-shadow:0 0 0 1px rgba(95,191,106,.4),0 0 24px rgba(95,191,106,.16)}
+.back{margin-top:16px}
+input.name{width:min(320px,100%);font-family:var(--f);font-size:22px;text-align:center;padding:12px;border-radius:10px;
+  border:2px solid var(--line);background:#1a1326;color:var(--ink);margin-bottom:8px;-webkit-user-select:text;user-select:text}
+.hint{color:var(--muted);font-size:13px;text-align:center;margin-top:18px;max-width:420px;line-height:1.5}
+
+/* ---------- HUD ---------- */
+#hud{position:fixed;inset:0;pointer-events:none;z-index:10}
+#hud > *{pointer-events:auto}
+.pframe{position:absolute;left:max(8px,env(safe-area-inset-left));top:max(8px,env(safe-area-inset-top));width:min(230px,52vw);
+  background:var(--panel);border:2px solid var(--line);border-radius:10px;padding:6px 8px 7px}
+.pframe .nm{display:flex;justify-content:space-between;align-items:baseline;font-weight:700;font-size:14px;gap:6px}
+.pframe .nm span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lvl{color:var(--gold);font-size:13px;white-space:nowrap}
+.bar{position:relative;height:13px;border-radius:4px;background:#0c0812;border:1px solid #000;margin-top:4px;overflow:hidden}
+.bar i{position:absolute;inset:0 auto 0 0;width:100%;border-radius:3px;transition:width .15s}
+.bar b{position:absolute;inset:0;font-size:10px;line-height:12px;text-align:center;font-weight:700;text-shadow:0 1px 1px #000;color:#fff}
+.bar.hp i{background:linear-gradient(#ef6b62,#a92a22)}
+.bar.mp i{background:linear-gradient(#6fa3ff,#2a58b0)}
+.bar.xp{height:5px;margin-top:5px}
+.bar.xp i{background:linear-gradient(#f0d27a,#a57c20)}
+.tframe{position:absolute;left:50%;transform:translateX(-50%);top:max(8px,env(safe-area-inset-top));width:min(200px,40vw);
+  background:var(--panel);border:2px solid #6b2a24;border-radius:10px;padding:5px 8px 7px;text-align:center;font-size:13px;font-weight:700}
+.tframe .lvl{margin-left:4px}
+.topr{position:absolute;right:max(8px,env(safe-area-inset-right));top:max(8px,env(safe-area-inset-top));display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.gold{background:var(--panel);border:2px solid var(--line);border-radius:10px;padding:4px 10px;font-weight:700;color:var(--gold);font-size:15px;display:flex;gap:8px;align-items:center}
+.iconbtn{width:38px;height:34px;border-radius:9px;background:var(--panel);border:2px solid var(--line);color:var(--ink);font-size:18px;padding:0}
+#minimap{border:2px solid var(--line);border-radius:8px;background:#000;width:110px;height:83px;image-rendering:pixelated}
+.quest{max-width:min(210px,46vw);background:var(--panel);border:2px solid var(--line);border-radius:10px;padding:6px 9px;font-size:13px;line-height:1.3}
+.quest .qt{color:var(--gold);font-weight:700;font-size:13px;margin-bottom:2px}
+.quest .qp{color:var(--good);font-weight:700}
+
+.skills{position:absolute;right:max(10px,env(safe-area-inset-right));bottom:max(12px,env(safe-area-inset-bottom));width:210px;height:190px}
+.sk{position:absolute;width:58px;height:58px;border-radius:50%;border:3px solid var(--gold2);background:radial-gradient(circle at 40% 35%,#3a2c52,#16101f);
+  color:#fff;font-size:26px;display:flex;align-items:center;justify-content:center;padding:0;overflow:hidden;box-shadow:0 3px 8px rgba(0,0,0,.6);touch-action:none}
+.sk .cd{position:absolute;inset:0;border-radius:50%;background:conic-gradient(rgba(0,0,0,.72) calc(var(--cd,0)*360deg),transparent 0)}
+.sk .cdt{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;text-shadow:0 1px 2px #000}
+.sk .key{position:absolute;bottom:2px;left:50%;transform:translateX(-50%);font-size:9px;opacity:.7}
+.sk .cost{position:absolute;top:3px;right:9px;font-size:9px;color:#9fc3ff;font-weight:700}
+.sk.nomp{filter:grayscale(.8) brightness(.7)}
+.sk.press{transform:scale(.92)}
+.sk.big{width:78px;height:78px;font-size:34px;right:6px;bottom:6px}
+.sk.s1{right:98px;bottom:4px}.sk.s2{right:90px;bottom:74px}.sk.s3{right:22px;bottom:104px}
+.pot{position:absolute;width:42px;height:42px;border-radius:10px;border:2px solid var(--line);background:var(--panel2);font-size:18px;padding:0;color:#fff}
+.pot span{position:absolute;right:2px;bottom:0;font-size:11px;font-weight:700}
+.pot.hpp{right:164px;bottom:66px}.pot.mpp{right:150px;bottom:116px}
+#joy{position:absolute;width:120px;height:120px;border-radius:50%;border:2px solid rgba(232,193,112,.4);background:rgba(20,14,30,.35);pointer-events:none;transform:translate(-50%,-50%)}
+#joy i{position:absolute;left:50%;top:50%;width:52px;height:52px;margin:-26px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#f3d58c,#8c6428);opacity:.85}
+.toast{position:absolute;left:50%;bottom:32%;transform:translateX(-50%);background:rgba(10,6,16,.8);border:1px solid var(--line);color:var(--gold);
+  padding:8px 16px;border-radius:10px;font-weight:700;font-size:17px;text-align:center;pointer-events:none;max-width:86vw;transition:opacity .3s}
+.dialog{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(380px,92vw);max-height:84vh;overflow:auto;background:var(--panel);
+  border:2px solid var(--gold2);border-radius:14px;padding:16px;z-index:30;box-shadow:0 10px 40px rgba(0,0,0,.7)}
+.dialog h3{margin:0 0 8px;color:var(--gold);font-size:20px}
+.dialog p{margin:6px 0;line-height:1.4;font-size:15px}
+.dialog .row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid #3a2d48}
+.dialog .btn{margin:10px auto 0;padding:10px 14px;font-size:16px}
+.dialog .sbtn{padding:8px 12px;font-size:14px;font-weight:700;border-radius:8px;border:2px solid #6b4817;background:linear-gradient(#f3d58c,#c9963f);color:#2a1a06}
+.dialog .sbtn:disabled{filter:grayscale(1);opacity:.5}
+.death{position:fixed;inset:0;background:rgba(40,0,0,.55);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:25}
+.death h2{font-size:40px;color:#ff7a6a}
+.keys{position:absolute;left:10px;bottom:8px;color:rgba(239,230,214,.55);font-size:12px;pointer-events:none}
+@media (hover:none){.keys,.sk .key{display:none}}
+@media (max-height:430px){
+  .skills{transform:scale(.85);transform-origin:bottom right}
+  #minimap{width:88px;height:66px}
+  .quest{font-size:12px}
+}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<!-- title -->
+<div class="screen" id="scrTitle">
+  <h1 class="logo">Легенди<br>Двох Кланів</h1>
+  <p class="sub">Прокляті Землі чекають на героя</p>
+  <button class="btn" id="bContinue" hidden>Продовжити<small id="contInfo"></small></button>
+  <button class="btn" id="bNew">Новий герой</button>
+  <p class="hint">Телефон: тягни пальцем зліва, щоб ходити, торкнись ворога, щоб атакувати.<br>Комп'ютер: WASD — ходьба, 1–4 — вміння, Q/E — зілля, Tab — найближчий ворог, клік — ціль або рух.</p>
+</div>
+
+<!-- faction -->
+<div class="screen" id="scrFaction" hidden>
+  <h2>Обери свій клан</h2>
+  <div class="cards">
+    <div class="card light" tabindex="0" data-f="light">
+      <canvas width="120" height="120" data-preview="paladin"></canvas>
+      <h3>Люди</h3>
+      <p>Орден Світанку тримає останній табір серед проклятих земель. Світло, сталь і віра.</p>
+      <p style="color:#9fc3ff">Паладин · Маг</p>
+    </div>
+    <div class="card dark" tabindex="0" data-f="dark">
+      <canvas width="120" height="120" data-preview="necro"></canvas>
+      <h3>Нежить</h3>
+      <p>Ті, хто повстав із могил, але зберіг волю. Тінь, кістки й голод до сили.</p>
+      <p style="color:#9fe7a8">Некромант · Воїн</p>
+    </div>
+  </div>
+  <button class="btn ghost back" data-back="scrTitle">Назад</button>
+</div>
+
+<!-- class -->
+<div class="screen" id="scrClass" hidden>
+  <h2>Обери клас</h2>
+  <div class="cards" id="classCards"></div>
+  <button class="btn ghost back" data-back="scrFaction">Назад</button>
+</div>
+
+<!-- name -->
+<div class="screen" id="scrName" hidden>
+  <h2>Ім'я героя</h2>
+  <canvas id="namePreview" width="140" height="140" style="width:140px;height:140px;image-rendering:pixelated"></canvas>
+  <input class="name" id="nameIn" maxlength="14" autocomplete="off" spellcheck="false">
+  <button class="btn" id="bStart">У бій!</button>
+  <button class="btn ghost back" data-back="scrClass">Назад</button>
+</div>
+
+<!-- HUD -->
+<div id="hud" hidden>
+  <div class="pframe">
+    <div class="nm"><span id="hName">—</span><span class="lvl" id="hLvl">1 рів.</span></div>
+    <div class="bar hp"><i id="hHp"></i><b id="hHpT"></b></div>
+    <div class="bar mp"><i id="hMp"></i><b id="hMpT"></b></div>
+    <div class="bar xp"><i id="hXp"></i></div>
+  </div>
+  <div class="tframe" id="tFrame" hidden>
+    <div><span id="tName"></span><span class="lvl" id="tLvl"></span></div>
+    <div class="bar hp"><i id="tHp"></i><b id="tHpT"></b></div>
+  </div>
+  <div class="topr">
+    <div style="display:flex;gap:6px">
+      <div class="gold">🪙 <span id="hGold">0</span></div>
+      <button class="iconbtn" id="bMenu" aria-label="Меню">☰</button>
+    </div>
+    <canvas id="minimap" width="96" height="72"></canvas>
+    <div class="quest" id="quest"><div class="qt" id="qT"></div><div id="qD"></div><div class="qp" id="qP"></div></div>
+  </div>
+  <div class="skills" id="skills"></div>
+  <div id="joy" hidden><i></i></div>
+  <div class="toast" id="toast" style="opacity:0"></div>
+  <div class="keys">WASD — рух · 1–4 — вміння · Q/E — зілля · Tab — ціль</div>
+</div>
+
+<div class="dialog" id="dialog" hidden></div>
+<div class="death" id="death" hidden>
+  <h2>Ти загинув</h2>
+  <p style="color:var(--ink)">Темрява забрала частину твого золота.</p>
+  <button class="btn" id="bRevive">Відродитися в таборі</button>
+</div>
+
+<script src="game.js"></script>
+</body>
+</html>
