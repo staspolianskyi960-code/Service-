@@ -108,7 +108,7 @@ function openEdit(p0){
 $('#scanBtn').onclick=()=>openLive('part');
 const withTimeout=(p,ms)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej({code:'timeout'}),ms))]);
 function stage(t){ const r=$('#vres'); if(scanMode==='vin' && r) r.innerHTML=`<p class="note">${esc(t)}</p>`; else toast(t); }
-const asVin=s=>{ let raw=String(s||'').toUpperCase().trim(); if(raw.length===18&&raw[0]==='I') raw=raw.slice(1); const m=cleanVin(raw).match(/[A-HJ-NPR-Z0-9]{17}/); return m?m[0]:null; };
+const asVin=s=>{ let raw=String(s||'').toUpperCase().trim(); if(raw.length===18&&raw[0]==='I') raw=raw.slice(1); const c=cleanVin(raw.replace(/[^A-Z0-9]/g,'')); for(let i=0;i+17<=c.length;i++){ const v=c.slice(i,i+17); if(plausibleVin(v)) return v; } return null; };
 function foundCode(code, file, name){
   const c=norm(code);
   const hit=parts.find(p=>norm(p.pn)===c || norm(p.barcode)===c || docId(p.pn)===docId(c));
