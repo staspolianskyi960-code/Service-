@@ -18,8 +18,8 @@ function circ(c, x, y, r) { c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fil
 
 // ============ world gen ============
 const T = 32, MW = 96, MH = 72;
-const R = mulberry32(20260930);
-const NG = 64, nv = new Float32Array(NG * NG); for (let i = 0; i < nv.length; i++) nv[i] = R();
+let R = mulberry32(1);
+const NG = 64, nv = new Float32Array(NG * NG);
 function vn(x, y) {
   const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
   const g = (a, b) => nv[((b & 63) * NG) + (a & 63)];
@@ -33,10 +33,110 @@ const GRASS = 0, DARK = 1, DIRT = 2, WATER = 3, STONE = 4;
 const G = new Uint8Array(MW * MH), S = new Uint8Array(MW * MH), RES = new Uint8Array(MW * MH);
 const idx = (x, y) => y * MW + x;
 const inb = (x, y) => x >= 0 && y >= 0 && x < MW && y < MH;
-const objs = [], decals = [], lights = [];
-const CAMP = { tx: 48, ty: 36 }, GRAVE = { tx: 76, ty: 14 }, SWAMP = { tx: 18, ty: 56 }, CRYPT = { tx: 86, ty: 40 };
+const objs = [], decals = [], lights = [], portals = [];
 const tdist = (x, y, p) => Math.hypot(x - p.tx, y - p.ty);
 const tc = t => t * T + T / 2;
+
+// ---- maps ----
+const MAPS = {
+  cursed: {
+    id: 'cursed', name: 'Прокляті Землі', seed: 20260930, lv: '1–12', dark: .5, tint: '12,6,28', liqT: .3, liquid: 'water', treeDens: .5, rock: 'rock', graveP: .004,
+    pal: { 0: ['#39432c', '#434e33', '#2f3824'], 1: ['#2e2f2a', '#363629', '#262620'], 2: ['#4e3d2b', '#5a4733', '#433425'], 3: ['#1b3440', '#214050', '#16303a'], 4: ['#3b3844', '#45424f', '#33303b'] },
+    shore: '#2c4b3a', flora: [['tree', .55], ['pine', .45]], decals: ['tuft', 'flower', 'bones'],
+    camp: { tx: 48, ty: 36 },
+    zones: [
+      { tx: 76, ty: 14, r: 10, kind: 'graves', spawn: [['skeleton', 3, 6, 15]] },
+      { tx: 18, ty: 56, r: 13, kind: 'swamp', spawn: [['ghost', 5, 8, 13]] },
+      { ring: 1, spawn: [['zombie', 1, 3, 20]] },
+      { tx: 76, ty: 40, r: 4, spawn: [['skeleton', 7, 9, 5]] }],
+    arena: { tx: 86, ty: 40, open: 'w', boss: ['boss', 12], col: '170,80,255' },
+    portals: [{ tx: 44, ty: 4, to: 'forest', lvl: 7 }],
+    extra: [[58, 66], [8, 30]],
+    quests: [
+      { t: 'Мертві біля табору', d: 'Знищ зомбі навколо табору', type: 'zombie', n: 6, xp: 90, gold: 20, z: 'camp' },
+      { t: 'Неспокійне кладовище', d: 'Скелети на північному сході', type: 'skeleton', n: 8, xp: 300, gold: 50, z: 0 },
+      { t: 'Болото привидів', d: 'Привиди на південному заході', type: 'ghost', n: 6, xp: 600, gold: 90, z: 1 },
+      { t: 'Страж Склепу', d: 'Здолай володаря склепу на сході', type: 'boss', n: 1, xp: 1500, gold: 300, z: 'arena' },
+      { t: 'Шлях на північ', d: 'Портал на півночі веде до Зачарованого Лісу (7 рів.)', type: 'none', n: 1, xp: 0, gold: 0, z: 'p0' }],
+    hunt: [['zombie', 'camp'], ['skeleton', 0], ['ghost', 1]]
+  },
+  forest: {
+    id: 'forest', name: 'Зачарований Ліс', seed: 7713, lv: '7–16', dark: .34, tint: '4,16,10', liqT: .28, liquid: 'water', treeDens: .62, rock: 'rock', graveP: 0,
+    pal: { 0: ['#3c5a29', '#4a6b31', '#324d23'], 1: ['#2f4824', '#38552a', '#283f1e'], 2: ['#5a4630', '#685238', '#4d3c29'], 3: ['#1d4a52', '#245a62', '#183f46'], 4: ['#4a4a46', '#555551', '#40403c'] },
+    shore: '#3a5a2e', flora: [['oak', .6], ['pine', .4]], decals: ['tuft', 'flower', 'shroomR', 'tuft', 'flower'],
+    camp: { tx: 48, ty: 60 },
+    zones: [
+      { tx: 24, ty: 42, r: 11, kind: 'den', spawn: [['wolf', 8, 10, 16]] },
+      { tx: 72, ty: 38, r: 11, kind: 'webs', spawn: [['spider', 10, 12, 16]] },
+      { ring: 1, spawn: [['wolf', 7, 8, 9]] }],
+    arena: { tx: 74, ty: 12, open: 's', boss: ['spiderQueen', 16], col: '200,80,220' },
+    portals: [{ tx: 48, ty: 67, to: 'cursed', lvl: 1 }, { tx: 14, ty: 5, to: 'ruins', lvl: 12 }],
+    extra: [[40, 22]],
+    quests: [
+      { t: 'Вовча зграя', d: 'Перебий вовків на заході лісу', type: 'wolf', n: 8, xp: 1100, gold: 120, z: 0 },
+      { t: 'Павутиння', d: 'Знищ павуків на сході', type: 'spider', n: 8, xp: 1500, gold: 150, z: 1 },
+      { t: 'Королева павуків', d: 'Гніздо на північному сході', type: 'spiderQueen', n: 1, xp: 4000, gold: 500, z: 'arena' },
+      { t: 'До руїн', d: 'Портал на північному заході (12 рів.)', type: 'none', n: 1, xp: 0, gold: 0, z: 'p1' }],
+    hunt: [['wolf', 0], ['spider', 1]]
+  },
+  ruins: {
+    id: 'ruins', name: 'Руїни Фортеці', seed: 3391, lv: '12–20', dark: .42, tint: '10,10,22', liqT: .26, liquid: 'water', treeDens: .32, rock: 'rock', graveP: .003, ruinP: .012,
+    pal: { 0: ['#4a4b38', '#55563f', '#404130'], 1: ['#3a3a30', '#444438', '#33332a'], 2: ['#5a5040', '#665a48', '#4d4436'], 3: ['#22333b', '#2b3d45', '#1d2b32'], 4: ['#55525c', '#615e68', '#4a4752'] },
+    shore: '#3e463a', flora: [['tree', .6], ['oak', .4]], decals: ['bones', 'tuft', 'rubble', 'rubble'],
+    camp: { tx: 48, ty: 60 },
+    zones: [
+      { tx: 22, ty: 38, r: 11, kind: 'ruins', spawn: [['deadKnight', 12, 14, 16]] },
+      { tx: 72, ty: 42, r: 10, kind: 'ruins', spawn: [['archer', 13, 15, 14]] },
+      { ring: 1, spawn: [['deadKnight', 11, 12, 8]] }],
+    arena: { tx: 46, ty: 14, open: 's', boss: ['ghostKnight', 20], col: '120,170,255' },
+    portals: [{ tx: 48, ty: 67, to: 'forest', lvl: 1 }, { tx: 85, ty: 6, to: 'ice', lvl: 16 }],
+    extra: [[14, 14]],
+    quests: [
+      { t: 'Мертва варта', d: 'Знищ мертвих лицарів на заході', type: 'deadKnight', n: 8, xp: 2600, gold: 200, z: 0 },
+      { t: 'Стріли з мурів', d: 'Скелети-лучники на сході', type: 'archer', n: 8, xp: 3000, gold: 220, z: 1 },
+      { t: 'Лицар-Привид', d: 'Цитадель на півночі', type: 'ghostKnight', n: 1, xp: 8000, gold: 800, z: 'arena' },
+      { t: 'У гори', d: 'Портал на північному сході (16 рів.)', type: 'none', n: 1, xp: 0, gold: 0, z: 'p1' }],
+    hunt: [['deadKnight', 0], ['archer', 1]]
+  },
+  ice: {
+    id: 'ice', name: 'Крижані Гори', seed: 5521, lv: '16–24', dark: .2, tint: '20,30,60', liqT: .3, liquid: 'ice', treeDens: .5, rock: 'icerock', graveP: 0,
+    pal: { 0: ['#d6e0e8', '#e6eef4', '#c6d2dc'], 1: ['#bccbd8', '#cad8e4', '#adbdcc'], 2: ['#9aa6b4', '#a8b4c0', '#8c98a6'], 3: ['#86c2e2', '#9ad2ee', '#74b0d2'], 4: ['#6a7a8c', '#7a8a9c', '#5a6a7c'] },
+    shore: '#eef6fc', flora: [['spine', 1]], decals: ['snowtuft', 'icecrack', 'snowtuft'],
+    camp: { tx: 48, ty: 60 },
+    zones: [
+      { tx: 24, ty: 40, r: 11, kind: 'icefield', spawn: [['yeti', 16, 18, 15]] },
+      { tx: 72, ty: 36, r: 11, kind: 'icefield', spawn: [['iceElem', 17, 19, 14]] },
+      { ring: 1, spawn: [['yeti', 15, 16, 8]] }],
+    arena: { tx: 58, ty: 12, open: 's', boss: ['frostGiant', 24], col: '140,220,255' },
+    portals: [{ tx: 48, ty: 67, to: 'ruins', lvl: 1 }, { tx: 12, ty: 6, to: 'volcano', lvl: 20 }],
+    extra: [],
+    quests: [
+      { t: 'Снігові звірі', d: 'Йєті на заході', type: 'yeti', n: 8, xp: 5000, gold: 300, z: 0 },
+      { t: 'Живий лід', d: 'Крижані духи на сході', type: 'iceElem', n: 8, xp: 5600, gold: 330, z: 1 },
+      { t: 'Крижаний Велетень', d: 'Вершина на півночі', type: 'frostGiant', n: 1, xp: 14000, gold: 1200, z: 'arena' },
+      { t: 'У вогонь', d: 'Портал на північному заході (20 рів.)', type: 'none', n: 1, xp: 0, gold: 0, z: 'p1' }],
+    hunt: [['yeti', 0], ['iceElem', 1]]
+  },
+  volcano: {
+    id: 'volcano', name: 'Вулканічна Пустка', seed: 9043, lv: '20–30', dark: .36, tint: '34,6,0', liqT: .3, liquid: 'lava', treeDens: .3, rock: 'obsidian', graveP: 0,
+    pal: { 0: ['#3a302c', '#443833', '#302824'], 1: ['#2a2220', '#332a27', '#221c1a'], 2: ['#4a3a30', '#554236', '#3f3129'], 3: ['#d04a10', '#f07a20', '#b03a08'], 4: ['#3a3236', '#463c42', '#30292c'] },
+    shore: '#5a2a10', flora: [['char', 1]], decals: ['ember', 'rubble', 'bones', 'ember'],
+    camp: { tx: 48, ty: 60 },
+    zones: [
+      { tx: 22, ty: 36, r: 11, kind: 'lavafield', spawn: [['imp', 20, 22, 15]] },
+      { tx: 72, ty: 38, r: 11, kind: 'lavafield', spawn: [['demon', 21, 24, 15]] },
+      { ring: 1, spawn: [['imp', 19, 20, 8]] }],
+    arena: { tx: 48, ty: 13, open: 's', boss: ['flameLord', 28], col: '255,120,40' },
+    portals: [{ tx: 48, ty: 67, to: 'ice', lvl: 1 }],
+    extra: [],
+    quests: [
+      { t: 'Біси', d: 'Знищ бісів на заході', type: 'imp', n: 8, xp: 9000, gold: 450, z: 0 },
+      { t: 'Демони пустки', d: 'Демони на сході', type: 'demon', n: 8, xp: 10000, gold: 500, z: 1 },
+      { t: 'Володар Полум\'я', d: 'Кратер на півночі', type: 'flameLord', n: 1, xp: 30000, gold: 3000, z: 'arena' }],
+    hunt: [['imp', 0], ['demon', 1]]
+  }
+};
+let M = MAPS.cursed, CAMP = M.camp, ARENA = M.arena;
 
 function carve(ax, ay, bx, by, seed) {
   const n = Math.ceil(Math.hypot(bx - ax, by - ay) * 2);
@@ -57,79 +157,115 @@ function addObj(type, tx, ty, solid = true, extra) {
   const o = Object.assign({ type, tx, ty, x: tc(tx), y: ty * T + T - 3 }, extra || {});
   objs.push(o); if (solid) S[idx(tx, ty)] = 1; return o;
 }
-function genWorld() {
+function arenaDoor(a) { return a.open === 'w' ? { tx: a.tx - 8, ty: a.ty } : { tx: a.tx, ty: a.ty + 8 }; }
+function pickFlora() { let r = R(), acc = 0; for (const [t, w] of M.flora) { acc += w; if (r <= acc) return t; } return M.flora[0][0]; }
+function genWorld(cfg) {
+  M = cfg; CAMP = cfg.camp; ARENA = cfg.arena;
+  R = mulberry32(cfg.seed); for (let i = 0; i < nv.length; i++) nv[i] = R();
+  G.fill(0); S.fill(0); RES.fill(0); objs.length = 0; decals.length = 0; lights.length = 0; portals.length = 0;
+  const zones = cfg.zones.filter(z => !z.ring);
   for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) {
     const n = fbm(x, y), i = idx(x, y);
     G[i] = n < .46 ? DARK : GRASS;
-    if (n < .3 && tdist(x, y, CAMP) > 12) G[i] = WATER;
-    const ds = tdist(x, y, SWAMP);
-    if (ds < 13) { const m = fbm(x * 1.7 + 40, y * 1.7); G[i] = m < .44 ? WATER : DARK; }
-    if (tdist(x, y, GRAVE) < 11) G[i] = DARK;
+    if (n < cfg.liqT && tdist(x, y, CAMP) > 12) G[i] = WATER;
+    for (const z of zones) {
+      const d = tdist(x, y, z);
+      if (d >= z.r + 1) continue;
+      if (z.kind === 'swamp' || z.kind === 'icefield' || z.kind === 'lavafield') { const m = fbm(x * 1.7 + 40, y * 1.7); G[i] = m < (z.kind === 'swamp' ? .44 : .38) ? WATER : DARK; }
+      else if (z.kind === 'graves' || z.kind === 'webs' || z.kind === 'den') G[i] = DARK;
+      else if (z.kind === 'ruins') G[i] = fbm(x * 2.3 + 9, y * 2.3) < .52 ? STONE : DIRT;
+    }
   }
-  // camp
   for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) {
     const d = tdist(x, y, CAMP);
     if (d < 6.5) G[idx(x, y)] = DIRT;
     if (d < 8.5) { RES[idx(x, y)] = 1; if (G[idx(x, y)] === WATER) G[idx(x, y)] = GRASS; }
   }
-  // crypt
-  for (let y = CRYPT.ty - 6; y <= CRYPT.ty + 6; y++) for (let x = CRYPT.tx - 6; x <= CRYPT.tx + 6; x++) {
-    if (!inb(x, y)) continue; const i = idx(x, y);
-    G[i] = STONE; RES[i] = 1;
+  const A = ARENA;
+  for (let y = A.ty - 6; y <= A.ty + 6; y++) for (let x = A.tx - 6; x <= A.tx + 6; x++) { if (!inb(x, y)) continue; G[idx(x, y)] = STONE; RES[idx(x, y)] = 1; }
+  let sd = 3;
+  for (const z of zones) carve(CAMP.tx, CAMP.ty, z.tx, z.ty, sd += 4);
+  const door = arenaDoor(A); carve(CAMP.tx, CAMP.ty, door.tx, door.ty, sd += 4);
+  for (const p of cfg.portals) carve(CAMP.tx, CAMP.ty, p.tx, p.ty, sd += 4);
+  for (const e of cfg.extra) carve(CAMP.tx, CAMP.ty, e[0], e[1], sd += 4);
+  // arena walls
+  for (let y = A.ty - 5; y <= A.ty + 5; y++) for (let x = A.tx - 5; x <= A.tx + 5; x++) {
+    const edge = x === A.tx - 5 || x === A.tx + 5 || y === A.ty - 5 || y === A.ty + 5;
+    const gap = A.open === 'w' ? (x === A.tx - 5 && Math.abs(y - A.ty) <= 1) : (y === A.ty + 5 && Math.abs(x - A.tx) <= 1);
+    if (edge && !gap) addObj('wall', x, y);
   }
-  carve(CAMP.tx, CAMP.ty, GRAVE.tx - 2, GRAVE.ty + 3, 3);
-  carve(CAMP.tx, CAMP.ty, SWAMP.tx + 3, SWAMP.ty - 3, 7);
-  carve(CAMP.tx, CAMP.ty, CRYPT.tx - 8, CRYPT.ty, 11);
-  carve(CAMP.tx, CAMP.ty, 44, 6, 13);
-  carve(CAMP.tx, CAMP.ty, 58, 66, 17);
-  carve(CAMP.tx, CAMP.ty, 8, 30, 19);
-  // crypt walls
-  for (let y = CRYPT.ty - 5; y <= CRYPT.ty + 5; y++) for (let x = CRYPT.tx - 5; x <= CRYPT.tx + 5; x++) {
-    const edge = x === CRYPT.tx - 5 || x === CRYPT.tx + 5 || y === CRYPT.ty - 5 || y === CRYPT.ty + 5;
-    if (edge && !(x === CRYPT.tx - 5 && Math.abs(y - CRYPT.ty) <= 1)) addObj('wall', x, y);
-  }
-  for (const [dx, dy] of [[-2, -2], [2, -2], [-2, 2], [2, 2]]) addObj('pillar', CRYPT.tx + dx, CRYPT.ty + dy);
-  lights.push({ x: tc(CRYPT.tx), y: tc(CRYPT.ty), r: 150, col: 'rgba(170,80,255,' });
+  for (const [dx, dy] of [[-2, -2], [2, -2], [-2, 2], [2, 2]]) addObj('pillar', A.tx + dx, A.ty + dy);
+  lights.push({ x: tc(A.tx), y: tc(A.ty), r: 150, col: 'rgba(' + A.col + ',' });
   // camp
   const c = CAMP;
   const fire = addObj('fire', c.tx, c.ty); lights.push({ x: fire.x, y: fire.y - 8, r: 230, col: 'rgba(255,170,70,', fire: 1 });
   addObj('tent', c.tx - 4, c.ty - 3); addObj('tent', c.tx + 4, c.ty - 3); addObj('tent', c.tx, c.ty - 5);
   addObj('barrel', c.tx + 5, c.ty + 2); addObj('barrel', c.tx + 5, c.ty + 3); addObj('crate', c.tx - 5, c.ty + 3);
   addObj('banner', c.tx - 2, c.ty - 4, true); addObj('banner', c.tx + 2, c.ty - 4, true);
+  // portals
+  for (const p of cfg.portals) {
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const X = p.tx + dx, Y = p.ty + dy; if (inb(X, Y)) { RES[idx(X, Y)] = 1; if (G[idx(X, Y)] === WATER) G[idx(X, Y)] = DIRT; } }
+    const o = addObj('portal', p.tx, p.ty, false, { to: p.to, lvl: p.lvl, col: MAPS[p.to].portalCol });
+    portals.push(o); lights.push({ x: o.x, y: o.y - 18, r: 110, col: 'rgba(' + o.col + ',' });
+  }
   // border
   for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) {
     const i = idx(x, y);
     if (G[i] === WATER) S[i] = 1;
     if (x < 2 || y < 2 || x >= MW - 2 || y >= MH - 2) {
       if (G[i] === WATER) G[i] = DARK;
-      if (!S[i]) addObj(R() < .6 ? 'pine' : 'tree', x, y, true, { v: R() });
+      if (!S[i]) addObj(pickFlora(), x, y, true, { v: R() });
       S[i] = 1;
     }
   }
   // scatter
   for (let y = 2; y < MH - 2; y++) for (let x = 2; x < MW - 2; x++) {
     const i = idx(x, y); if (RES[i] || S[i] || G[i] === WATER) continue;
-    const dg = tdist(x, y, GRAVE), ds = tdist(x, y, SWAMP);
-    if (dg < 9.5) {
+    let z = null; for (const q of zones) if (tdist(x, y, q) < q.r - .5) { z = q; break; }
+    if (z && z.kind === 'graves') {
       if (x % 3 === 0 && y % 3 === 1 && R() < .8) addObj('grave', x, y, true, { v: R() });
       else if (R() < .04) addObj('tree', x, y, true, { v: R() });
       else if (R() < .06) decals.push({ t: 'bones', x, y, v: R() });
       continue;
     }
-    if (ds < 13) {
-      if (R() < .09) addObj('tree', x, y, true, { v: R() });
-      else if (R() < .07) { decals.push({ t: 'shroom', x, y, v: R() }); }
+    if (z && (z.kind === 'swamp' || z.kind === 'icefield' || z.kind === 'lavafield')) {
+      if (R() < .08) addObj(pickFlora(), x, y, true, { v: R() });
+      else if (R() < .05) addObj(cfg.rock, x, y, true, { v: R() });
+      else if (R() < .07) decals.push({ t: z.kind === 'swamp' ? 'shroom' : cfg.decals[0], x, y, v: R() });
+      continue;
+    }
+    if (z && z.kind === 'webs') {
+      if (R() < .07) decals.push({ t: 'web', x, y, v: R() });
+      else if (R() < .06) addObj('tree', x, y, true, { v: R() });
+      else if (R() < .04) decals.push({ t: 'bones', x, y, v: R() });
+      continue;
+    }
+    if (z && z.kind === 'den') {
+      if (R() < .1) addObj(pickFlora(), x, y, true, { v: R() });
+      else if (R() < .04) addObj('rock', x, y, true, { v: R() });
+      else if (R() < .06) decals.push({ t: 'bones', x, y, v: R() });
+      continue;
+    }
+    if (z && z.kind === 'ruins') {
+      if (R() < .06) addObj('ruinwall', x, y, true, { v: R() });
+      else if (R() < .025) addObj('bpillar', x, y, true, { v: R() });
+      else if (R() < .06) decals.push({ t: R() < .5 ? 'rubble' : 'bones', x, y, v: R() });
       continue;
     }
     const n = fbm(x + 50, y + 50);
-    if (n > .6 && R() < .5) addObj(R() < .55 ? 'tree' : 'pine', x, y, true, { v: R() });
-    else if (R() < .014) addObj('rock', x, y, true, { v: R() });
-    else if (R() < .004) addObj('grave', x, y, true, { v: R() });
-    else if (R() < .05) decals.push({ t: R() < .5 ? 'tuft' : (R() < .5 ? 'flower' : 'bones'), x, y, v: R() });
+    if (n > .6 && R() < cfg.treeDens) addObj(pickFlora(), x, y, true, { v: R() });
+    else if (R() < .014) addObj(cfg.rock, x, y, true, { v: R() });
+    else if (R() < (cfg.ruinP || 0)) addObj(R() < .7 ? 'ruinwall' : 'bpillar', x, y, true, { v: R() });
+    else if (R() < cfg.graveP) addObj('grave', x, y, true, { v: R() });
+    else if (R() < .05) decals.push({ t: cfg.decals[Math.floor(R() * cfg.decals.length)], x, y, v: R() });
   }
-  for (const d of decals) if (d.t === 'shroom') lights.push({ x: tc(d.x), y: tc(d.y), r: 60, col: 'rgba(90,255,190,' });
+  for (const d of decals) {
+    if (d.t === 'shroom') lights.push({ x: tc(d.x), y: tc(d.y), r: 60, col: 'rgba(90,255,190,' });
+    if (d.t === 'ember' && d.v < .3) lights.push({ x: tc(d.x), y: tc(d.y), r: 50, col: 'rgba(255,120,30,' });
+  }
   objs.sort((a, b) => a.y - b.y);
 }
+MAPS.cursed.portalCol = '170,90,255'; MAPS.forest.portalCol = '90,255,120'; MAPS.ruins.portalCol = '140,170,255'; MAPS.ice.portalCol = '150,230,255'; MAPS.volcano.portalCol = '255,120,40';
 
 // ============ sprites ============
 function spr(w, h, fn) { const c = document.createElement('canvas'); c.width = w * 2; c.height = h * 2; const g = c.getContext('2d'); g.scale(2, 2); fn(g, w, h); c.w = w; c.h = h; return c; }
@@ -226,15 +362,73 @@ function buildSprites() {
   });
 }
 
+
+function buildSprites2() {
+  for (let v = 0; v < 3; v++) SPR['oak' + v] = spr(60, 74, (g, w, h) => {
+    const cx = w / 2, b = h - 4;
+    g.fillStyle = 'rgba(0,0,0,.35)'; ell(g, cx, b, 20, 6);
+    g.fillStyle = '#4a3020'; g.fillRect(cx - 4, b - 26, 8, 26); g.fillStyle = '#5e3e28'; g.fillRect(cx - 4, b - 26, 3, 26);
+    const cols = [['#2a5a24', '#3a7430', '#4f8f3c'], ['#2e5420', '#406c2a', '#5a8a38'], ['#24502c', '#33683a', '#4a8448']][v];
+    const blobs = [[0, -40, 18], [-12, -32, 12], [12, -33, 13], [-6, -50, 12], [8, -48, 11]];
+    g.fillStyle = cols[0]; for (const [x, y, r] of blobs) circ(g, cx + x, b + y, r);
+    g.fillStyle = cols[1]; for (const [x, y, r] of blobs) circ(g, cx + x - 2, b + y - 2, r * .78);
+    g.fillStyle = cols[2]; for (const [x, y, r] of blobs) circ(g, cx + x - 4, b + y - 4, r * .4);
+    if (v === 1) { g.fillStyle = '#c03a3a'; for (let k = 0; k < 6; k++) circ(g, cx + Math.sin(k * 2.1) * 14, b - 40 + Math.cos(k * 1.3) * 10, 1.8); }
+  });
+  for (let v = 0; v < 2; v++) SPR['spine' + v] = spr(52, 78, (g, w, h) => {
+    const cx = w / 2, b = h - 4;
+    g.fillStyle = 'rgba(40,60,90,.3)'; ell(g, cx, b, 17, 6);
+    g.fillStyle = '#3a2a1e'; g.fillRect(cx - 3, b - 12, 6, 12);
+    for (let k = 0; k < 4; k++) {
+      const yb = b - 8 - k * 14, hw = 22 - k * 4.5;
+      g.fillStyle = v ? '#1f3a34' : '#24403a'; g.beginPath(); g.moveTo(cx - hw, yb); g.lineTo(cx, yb - 26); g.lineTo(cx + hw, yb); g.closePath(); g.fill();
+      g.fillStyle = '#f2f7fb'; g.beginPath(); g.moveTo(cx - hw + 2, yb - 3); g.lineTo(cx, yb - 26); g.lineTo(cx + hw * .5, yb - 6); g.lineTo(cx - hw * .2, yb - 5); g.closePath(); g.fill();
+    }
+  });
+  for (let v = 0; v < 2; v++) SPR['char' + v] = spr(56, 70, (g, w, h) => {
+    const cx = w / 2, b = h - 4;
+    g.fillStyle = 'rgba(0,0,0,.4)'; ell(g, cx, b, 15, 5);
+    g.strokeStyle = '#1a1210'; g.lineCap = 'round'; g.lineWidth = 7;
+    g.beginPath(); g.moveTo(cx, b); g.lineTo(cx + v * 3, b - 38); g.stroke();
+    g.lineWidth = 3;
+    for (const [a1, b1, a2, b2] of [[-14, -44, -20, -56], [12, -46, 20, -58], [-8, -30, -18, -32], [9, -32, 18, -38]]) { g.beginPath(); g.moveTo(cx + v * 2, b - 30); g.quadraticCurveTo(cx + a1, b + b1, cx + a2, b + b2); g.stroke(); }
+    g.fillStyle = '#ff6a1a'; for (let k = 0; k < 5; k++) g.fillRect(cx - 2 + Math.sin(k * 3) * 2, b - 6 - k * 7, 2, 2);
+  });
+  const rockSpr = (name, base, hi, acc) => { for (let v = 0; v < 2; v++) SPR[name + v] = spr(36, 30, (g, w, h) => {
+    const cx = w / 2, b = h - 3;
+    g.fillStyle = 'rgba(0,0,0,.35)'; ell(g, cx, b, 15, 4);
+    g.fillStyle = base; g.beginPath(); g.moveTo(cx - 14, b); g.lineTo(cx - 10, b - 14 - v * 4); g.lineTo(cx - 2, b - 24); g.lineTo(cx + 8, b - 16); g.lineTo(cx + 14, b - 4); g.lineTo(cx + 12, b); g.closePath(); g.fill();
+    g.fillStyle = hi; g.beginPath(); g.moveTo(cx - 9, b - 13 - v * 4); g.lineTo(cx - 2, b - 23); g.lineTo(cx + 7, b - 15); g.lineTo(cx, b - 10); g.closePath(); g.fill();
+    g.fillStyle = acc; g.fillRect(cx + 2, b - 8, 6, 2);
+  }); };
+  rockSpr('icerock', '#7fb4d6', '#d4f0ff', '#ffffff');
+  rockSpr('obsidian', '#1e1820', '#3c3342', '#ff5a1a');
+  for (let v = 0; v < 2; v++) SPR['ruinwall' + v] = spr(34, 46, (g, w, h) => {
+    const b = h - 2;
+    g.fillStyle = 'rgba(0,0,0,.35)'; ell(g, 17, b, 16, 4);
+    const hh = v ? 30 : 20;
+    g.fillStyle = '#3e3b46'; g.fillRect(1, b - 12, 32, 12);
+    g.fillStyle = '#5a5664'; g.beginPath(); g.moveTo(1, b - 12); g.lineTo(1, b - hh - 12); g.lineTo(10, b - hh - 16); g.lineTo(16, b - hh - 8); g.lineTo(24, b - hh - 12); g.lineTo(33, b - 18); g.lineTo(33, b - 12); g.closePath(); g.fill();
+    g.strokeStyle = '#46424f'; g.lineWidth = 1; for (let r = 0; r < 3; r++) { g.beginPath(); g.moveTo(1, b - 16 - r * 8 + .5); g.lineTo(33, b - 16 - r * 8 + .5); g.stroke(); }
+    g.fillStyle = '#4a6a3a'; g.fillRect(3, b - 14, 8, 3); g.fillRect(22, b - 22, 5, 2);
+  });
+  SPR.bpillar = spr(26, 50, (g, w, h) => {
+    const b = h - 3, cx = w / 2;
+    g.fillStyle = 'rgba(0,0,0,.4)'; ell(g, cx, b, 12, 4);
+    g.fillStyle = '#3a3645'; g.fillRect(cx - 10, b - 8, 20, 8);
+    g.fillStyle = '#5a566a'; g.beginPath(); g.moveTo(cx - 7, b - 6); g.lineTo(cx - 7, b - 36); g.lineTo(cx - 2, b - 40); g.lineTo(cx + 3, b - 33); g.lineTo(cx + 7, b - 38); g.lineTo(cx + 7, b - 6); g.closePath(); g.fill();
+    g.fillStyle = '#6d6982'; g.fillRect(cx - 7, b - 34, 4, 28);
+  });
+}
+
 // ============ ground render ============
 let mapCv = null, miniBase = null;
-const GC = { [GRASS]: ['#39432c', '#434e33', '#2f3824'], [DARK]: ['#2e2f2a', '#363629', '#262620'], [DIRT]: ['#4e3d2b', '#5a4733', '#433425'], [WATER]: ['#1b3440', '#214050', '#16303a'], [STONE]: ['#3b3844', '#45424f', '#33303b'] };
 function renderGround() {
   mapCv = document.createElement('canvas'); mapCv.width = MW * T; mapCv.height = MH * T;
   const g = mapCv.getContext('2d');
   const r = mulberry32(99);
   for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) {
-    const t = G[idx(x, y)], c = GC[t], px = x * T, py = y * T;
+    const t = G[idx(x, y)], c = M.pal[t], px = x * T, py = y * T;
     g.fillStyle = c[0]; g.fillRect(px, py, T, T);
     if (t === STONE) {
       g.fillStyle = c[1]; g.fillRect(px + 1, py + 1, 14, 14); g.fillRect(px + 17, py + 17, 14, 14);
@@ -247,9 +441,10 @@ function renderGround() {
       if (t === GRASS || t === DARK) g.fillRect(sx, sy, 1, 3); else g.fillRect(sx, sy, 2, 2);
     }
     if (t === WATER) {
-      g.fillStyle = 'rgba(120,180,200,.12)'; g.fillRect(px + r() * 20, py + r() * 28, 10, 1);
+      g.fillStyle = M.liquid === 'lava' ? 'rgba(255,220,120,.35)' : M.liquid === 'ice' ? 'rgba(255,255,255,.45)' : 'rgba(120,180,200,.12)'; g.fillRect(px + r() * 20, py + r() * 28, 10, 1);
+      if (M.liquid === 'ice') { g.strokeStyle = 'rgba(255,255,255,.35)'; g.lineWidth = 1; g.beginPath(); g.moveTo(px + r() * T, py + r() * T); g.lineTo(px + r() * T, py + r() * T); g.stroke(); }
       const nb = (dx, dy) => { const X = x + dx, Y = y + dy; return inb(X, Y) && G[idx(X, Y)] !== WATER; };
-      g.fillStyle = '#2c4b3a';
+      g.fillStyle = M.shore;
       if (nb(0, -1)) g.fillRect(px, py, T, 4);
       if (nb(0, 1)) g.fillRect(px, py + T - 3, T, 3);
       if (nb(-1, 0)) g.fillRect(px, py, 3, T);
@@ -257,7 +452,7 @@ function renderGround() {
     }
     if (t === DIRT) {
       const nb = (dx, dy) => { const X = x + dx, Y = y + dy; return inb(X, Y) && (G[idx(X, Y)] === GRASS || G[idx(X, Y)] === DARK); };
-      g.fillStyle = 'rgba(40,50,30,.45)';
+      g.fillStyle = M.id === 'ice' ? 'rgba(230,240,248,.6)' : 'rgba(40,50,30,.45)';
       if (nb(0, -1)) for (let k = 0; k < 6; k++) g.fillRect(px + r() * T, py, 3, 2 + r() * 4);
       if (nb(0, 1)) for (let k = 0; k < 6; k++) g.fillRect(px + r() * T, py + T - 4, 3, 4);
       if (nb(-1, 0)) for (let k = 0; k < 6; k++) g.fillRect(px, py + r() * T, 2 + r() * 4, 3);
@@ -269,22 +464,32 @@ function renderGround() {
     const ang = a / 24 * Math.PI * 2, x = tc(CAMP.tx) + Math.cos(ang) * 6.3 * T, y = tc(CAMP.ty) + Math.sin(ang) * 6.3 * T;
     g.fillStyle = '#58545f'; ell(g, x, y, 5, 3.5); g.fillStyle = '#6f6b78'; ell(g, x - 1, y - 1, 3, 2);
   }
-  // crypt rune circle
-  g.strokeStyle = 'rgba(160,90,240,.45)'; g.lineWidth = 2; g.beginPath(); g.arc(tc(CRYPT.tx), tc(CRYPT.ty), 60, 0, Math.PI * 2); g.stroke();
-  g.beginPath(); g.arc(tc(CRYPT.tx), tc(CRYPT.ty), 44, 0, Math.PI * 2); g.stroke();
-  for (let k = 0; k < 5; k++) { const a = k / 5 * Math.PI * 2 - Math.PI / 2, a2 = (k + 2) / 5 * Math.PI * 2 - Math.PI / 2; g.beginPath(); g.moveTo(tc(CRYPT.tx) + Math.cos(a) * 44, tc(CRYPT.ty) + Math.sin(a) * 44); g.lineTo(tc(CRYPT.tx) + Math.cos(a2) * 44, tc(CRYPT.ty) + Math.sin(a2) * 44); g.stroke(); }
+  // arena rune circle
+  const AX = tc(ARENA.tx), AY = tc(ARENA.ty);
+  g.strokeStyle = 'rgba(' + ARENA.col + ',.45)'; g.lineWidth = 2; g.beginPath(); g.arc(AX, AY, 60, 0, Math.PI * 2); g.stroke();
+  g.beginPath(); g.arc(AX, AY, 44, 0, Math.PI * 2); g.stroke();
+  for (let k = 0; k < 5; k++) { const a = k / 5 * Math.PI * 2 - Math.PI / 2, a2 = (k + 2) / 5 * Math.PI * 2 - Math.PI / 2; g.beginPath(); g.moveTo(AX + Math.cos(a) * 44, AY + Math.sin(a) * 44); g.lineTo(AX + Math.cos(a2) * 44, AY + Math.sin(a2) * 44); g.stroke(); }
+  // portal pads
+  for (const p of portals) { g.fillStyle = '#3a3645'; ell(g, p.x, p.y - 4, 26, 12); g.fillStyle = '#4a4655'; ell(g, p.x, p.y - 5, 22, 9); g.strokeStyle = 'rgba(' + p.col + ',.5)'; g.beginPath(); g.ellipse(p.x, p.y - 5, 18, 7, 0, 0, 6.29); g.stroke(); }
   for (const d of decals) {
     const x = d.x * T + 6 + d.v * 18, y = d.y * T + 8 + ((d.v * 7) % 1) * 16;
     if (d.t === 'tuft') { g.fillStyle = '#4d5a37'; for (let k = 0; k < 5; k++) g.fillRect(x + k * 2 - 4, y - 3 - (k % 2) * 2, 1, 5 + (k % 2) * 2); }
     else if (d.t === 'flower') { g.fillStyle = '#4d5a37'; g.fillRect(x, y - 4, 1, 5); g.fillStyle = '#a06bd1'; circ(g, x, y - 5, 2); }
     else if (d.t === 'bones') { g.fillStyle = '#cfc8b4'; g.fillRect(x - 5, y, 10, 2); circ(g, x - 5, y + 1, 1.8); circ(g, x + 5, y + 1, 1.8); circ(g, x + 8, y - 5, 3.2); g.fillStyle = '#2a2520'; g.fillRect(x + 7, y - 6, 1, 1); g.fillRect(x + 9, y - 6, 1, 1); }
+    else if (d.t === 'shroomR') { for (let k = 0; k < 2; k++) { const sx = x + k * 6 - 3; g.fillStyle = '#e8e0d0'; g.fillRect(sx, y - 3, 2, 4); g.fillStyle = '#c0302a'; ell(g, sx + 1, y - 3, 3.5, 2.2); g.fillStyle = '#fff'; g.fillRect(sx, y - 4, 1, 1); } }
+    else if (d.t === 'rubble') { g.fillStyle = '#5c5866'; for (let k = 0; k < 4; k++) ell(g, x + k * 4 - 6, y + (k % 2) * 3, 3 - k * .4, 2); g.fillStyle = '#76727f'; ell(g, x - 6, y - 1, 1.5, 1); }
+    else if (d.t === 'snowtuft') { g.fillStyle = '#9fb6c6'; for (let k = 0; k < 5; k++) g.fillRect(x + k * 2 - 4, y - 3 - (k % 2) * 2, 1, 5 + (k % 2) * 2); g.fillStyle = '#fff'; ell(g, x, y + 1, 6, 1.5); }
+    else if (d.t === 'icecrack') { g.strokeStyle = 'rgba(120,160,190,.6)'; g.lineWidth = 1; g.beginPath(); g.moveTo(x - 8, y); g.lineTo(x - 2, y - 3); g.lineTo(x + 3, y + 2); g.lineTo(x + 9, y - 1); g.moveTo(x - 2, y - 3); g.lineTo(x, y - 8); g.stroke(); }
+    else if (d.t === 'ember') { g.fillStyle = '#2a1a14'; ell(g, x, y, 7, 3); g.fillStyle = '#ff7a2a'; for (let k = 0; k < 4; k++) g.fillRect(x - 5 + k * 3, y - 1 + (k % 2), 2, 2); g.fillStyle = '#ffd04a'; g.fillRect(x - 1, y - 1, 1, 1); }
+    else if (d.t === 'web') { g.strokeStyle = 'rgba(230,230,240,.45)'; g.lineWidth = .8; for (let k = 0; k < 6; k++) { const a = k / 6 * 6.28; g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * 13, y + Math.sin(a) * 9); g.stroke(); } for (let r2 = 4; r2 < 13; r2 += 4) { g.beginPath(); g.ellipse(x, y, r2, r2 * .7, 0, 0, 6.29); g.stroke(); } }
     else if (d.t === 'shroom') { for (let k = 0; k < 3; k++) { const sx = x + k * 5 - 5, sy = y + (k % 2) * 3; g.fillStyle = '#d8e8d8'; g.fillRect(sx, sy - 3, 2, 4); g.fillStyle = '#4fe0a8'; ell(g, sx + 1, sy - 3, 3.5, 2); } }
   }
   // minimap base
   miniBase = document.createElement('canvas'); miniBase.width = MW; miniBase.height = MH;
   const m = miniBase.getContext('2d'), im = m.createImageData(MW, MH);
-  const MC = { [GRASS]: [58, 70, 44], [DARK]: [48, 49, 42], [DIRT]: [120, 96, 66], [WATER]: [30, 70, 90], [STONE]: [90, 84, 104] };
-  for (let i = 0; i < MW * MH; i++) { let c = MC[G[i]]; if (S[i] && G[i] !== WATER) c = [26, 34, 28]; im.data[i * 4] = c[0]; im.data[i * 4 + 1] = c[1]; im.data[i * 4 + 2] = c[2]; im.data[i * 4 + 3] = 255; }
+  const hx = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+  const MC = {}; for (const k in M.pal) MC[k] = hx(M.pal[k][0]); MC[DIRT] = MC[DIRT].map(v => Math.min(255, v + 40));
+  for (let i = 0; i < MW * MH; i++) { let c = MC[G[i]]; if (S[i] && G[i] !== WATER) c = c.map(v => v * .45 | 0); im.data[i * 4] = c[0]; im.data[i * 4 + 1] = c[1]; im.data[i * 4 + 2] = c[2]; im.data[i * 4 + 3] = 255; }
   m.putImageData(im, 0, 0);
 }
 
@@ -492,6 +697,9 @@ function drawHumanoid(c, x, y, o) {
     c.fillStyle = L.orb; circ(c, 0, -29, 2.2);
   } else if (L.weapon === 'rsword') {
     c.fillStyle = '#8b7d6a'; c.fillRect(-1.3, 11, 2.6, 15); c.fillStyle = '#5a4a3a'; c.fillRect(-3, 10, 6, 2);
+  } else if (L.weapon === 'bow') {
+    c.rotate(-ang - 1.4); c.strokeStyle = '#6a4a2a'; c.lineWidth = 2; c.beginPath(); c.arc(0, 10, 12, -1.2, 1.2); c.stroke();
+    c.strokeStyle = 'rgba(230,230,220,.8)'; c.lineWidth = .8; c.beginPath(); c.moveTo(Math.cos(-1.2) * 12, 10 + Math.sin(-1.2) * 12); c.lineTo(atk >= 0 ? -4 : Math.cos(1.2) * 12 - 4, 10); c.lineTo(Math.cos(1.2) * 12, 10 + Math.sin(1.2) * 12); c.stroke();
   } else if (L.weapon === 'bigaxe') {
     c.fillStyle = '#231a2a'; c.fillRect(-1.6, 2, 3.2, 32);
     c.fillStyle = '#6c5a8a'; c.beginPath(); c.moveTo(1, 20); c.quadraticCurveTo(18, 16, 16, 36); c.lineTo(1, 32); c.closePath(); c.fill();
@@ -499,6 +707,70 @@ function drawHumanoid(c, x, y, o) {
     c.fillStyle = '#c9a0ff'; c.fillRect(13, 22, 2, 11);
   }
   c.restore();
+  c.restore();
+}
+function drawWolf(c, x, y, o) {
+  const D = o.D, s = o.scale || 1;
+  c.save(); c.translate(x, y); c.scale(s * o.face, s); c.globalAlpha = o.alpha;
+  c.fillStyle = 'rgba(0,0,0,.35)'; ell(c, 0, 0, 14, 4);
+  const mv = o.moving, ph = o.walk || 0, lg = mv ? Math.sin(ph) * 3.5 : 0, bob = mv ? Math.abs(Math.sin(ph)) * 1.3 : 0;
+  const lunge = o.atk >= 0 && o.atk < 1 ? Math.sin(o.atk * Math.PI) * 5 : 0;
+  c.fillStyle = D.col2;
+  c.fillRect(-10 + lg, -9, 3, 9); c.fillRect(-6 - lg, -9, 3, 9); c.fillRect(5 + lg, -9, 3, 9); c.fillRect(9 - lg, -9, 3, 9);
+  c.translate(lunge * .4, -bob);
+  c.fillStyle = D.col; c.beginPath(); c.moveTo(-11, -15); c.quadraticCurveTo(-20, -16 + Math.sin(ph) * 2, -22, -22); c.quadraticCurveTo(-16, -16, -11, -12); c.closePath(); c.fill();
+  ell(c, -1, -14, 12.5, 6.5);
+  c.fillStyle = D.col2; c.fillRect(-9, -20, 14, 3);
+  c.fillStyle = '#9a948c'; ell(c, 1, -10.5, 8, 2.6);
+  c.translate(lunge * .6, 0);
+  c.fillStyle = D.col; ell(c, 11, -19, 6.2, 5.2); ell(c, 16, -17, 4.6, 2.8);
+  c.beginPath(); c.moveTo(7, -22); c.lineTo(9, -29); c.lineTo(11, -23); c.closePath(); c.fill();
+  c.beginPath(); c.moveTo(11, -23); c.lineTo(13.5, -29); c.lineTo(14.5, -22); c.closePath(); c.fill();
+  c.fillStyle = '#111'; ell(c, 20, -17.5, 1.3, 1.1);
+  c.fillStyle = D.eye; c.fillRect(12.5, -21, 2, 1.6);
+  if (lunge > 2) { c.fillStyle = '#fff'; c.fillRect(15, -15.5, 1, 2); c.fillRect(17, -15.5, 1, 2); }
+  c.restore();
+}
+function drawSpider(c, x, y, o) {
+  const D = o.D, s = o.scale || 1;
+  c.save(); c.translate(x, y); c.scale(s * o.face, s); c.globalAlpha = o.alpha;
+  c.fillStyle = 'rgba(0,0,0,.35)'; ell(c, 0, 0, 15, 4.5);
+  const mv = o.moving, ph = o.walk || 0, rear = o.atk >= 0 && o.atk < 1 ? Math.sin(o.atk * Math.PI) * 5 : 0;
+  c.strokeStyle = D.col; c.lineWidth = 1.8; c.lineCap = 'round';
+  for (let k = 0; k < 4; k++) for (const sd of [-1, 1]) {
+    const sw = mv ? Math.sin(ph + k * 1.4 + (sd > 0 ? Math.PI : 0)) * 2.5 : 0;
+    const bx = 1 + k * 2.2 - 3, by = -9;
+    c.beginPath(); c.moveTo(bx, by); c.lineTo(bx + sd * 2 + (k - 1.5) * 4 + sw, by - 7); c.lineTo(bx + (k - 1.5) * 7 + sw * 1.5, -1 + (sd > 0 ? 1 : 0)); c.stroke();
+  }
+  c.translate(0, -rear);
+  c.fillStyle = D.col; ell(c, -7, -11, 9, 7.5);
+  c.fillStyle = D.col2; ell(c, -8, -13, 4.5, 3); c.fillRect(-11, -9, 7, 1.5);
+  c.fillStyle = D.col; ell(c, 4, -10, 5.5, 4.5);
+  c.fillStyle = D.eye; c.fillRect(6, -12, 1.5, 1.5); c.fillRect(8.4, -12, 1.5, 1.5); c.fillRect(7.2, -10.2, 1.2, 1.2);
+  c.fillStyle = '#d8d0c0'; c.fillRect(8.5, -8, 1, 2.5 + rear * .3); c.fillRect(6.5, -8, 1, 2.5 + rear * .3);
+  c.restore();
+}
+function drawCrystal(c, x, y, o) {
+  const D = o.D, s = o.scale || 1, t = o.t;
+  c.save(); c.translate(x, y); c.scale(s, s); c.globalAlpha = o.alpha;
+  c.fillStyle = 'rgba(40,80,120,.3)'; ell(c, 0, 0, 9, 3);
+  const fy = -20 + Math.sin(t * 2.5) * 3;
+  c.fillStyle = 'rgba(150,220,255,.22)'; circ(c, 0, fy, 15);
+  c.fillStyle = D.col; c.beginPath(); c.moveTo(0, fy - 14); c.lineTo(7, fy); c.lineTo(0, fy + 12); c.lineTo(-7, fy); c.closePath(); c.fill();
+  c.fillStyle = D.col2; c.beginPath(); c.moveTo(0, fy - 14); c.lineTo(-7, fy); c.lineTo(0, fy + 2); c.closePath(); c.fill();
+  for (let k = 0; k < 3; k++) { const a = t * 1.6 + k * 2.09, sx = Math.cos(a) * 12, sy = fy + Math.sin(a) * 4; c.fillStyle = k % 2 ? D.col : D.col2; c.beginPath(); c.moveTo(sx, sy - 4); c.lineTo(sx + 2.5, sy); c.lineTo(sx, sy + 4); c.lineTo(sx - 2.5, sy); c.closePath(); c.fill(); }
+  c.fillStyle = '#1a3a5a'; c.fillRect(-2.5, fy - 3, 1.6, 1.6); c.fillRect(1, fy - 3, 1.6, 1.6);
+  c.restore();
+}
+function drawPortal(o) {
+  const c = ctx, col = o.col, locked = P && P.lvl < o.lvl;
+  c.save(); c.translate(o.x, o.y - 6);
+  c.fillStyle = '#3a3645'; c.fillRect(-20, -40, 6, 40); c.fillRect(14, -40, 6, 40);
+  c.fillStyle = '#56526a'; c.fillRect(-20, -40, 3, 40); c.fillRect(14, -40, 3, 40);
+  c.fillStyle = '#4a4655'; c.beginPath(); c.moveTo(-22, -40); c.quadraticCurveTo(0, -60, 22, -40); c.lineTo(22, -36); c.quadraticCurveTo(0, -54, -22, -36); c.closePath(); c.fill();
+  c.fillStyle = 'rgba(' + col + ',' + (locked ? .12 : .3) + ')'; ell(c, 0, -20, 13, 20);
+  for (let k = 0; k < 4; k++) { c.strokeStyle = 'rgba(' + col + ',' + ((locked ? .35 : .9) - k * .18) + ')'; c.lineWidth = 2; c.beginPath(); c.ellipse(0, -20, 12 - k * 2.6, 19 - k * 4, 0, time * 3 + k, time * 3 + k + 4.2); c.stroke(); }
+  if (!locked && Math.random() < .4) parts.push({ x: o.x + rnd(-10, 10), y: o.y - 6 - rnd(4, 36), vx: 0, vy: -20, life: .6, max: .6, col: 'rgb(' + col + ')', size: 2, grav: 0 });
   c.restore();
 }
 function drawGhost(c, x, y, t, s, alpha) {
@@ -516,63 +788,98 @@ function drawGhost(c, x, y, t, s, alpha) {
 
 // ============ enemies ============
 const ETYPES = {
-  zombie: { name: 'Зомбі', hp: l => 40 + l * 18, dmg: l => 5 + l * 2.3, speed: 42, range: 26, cd: 1.6, aggro: 130, xp: l => 14 + l * 6, gold: [2, 5],
+  zombie: { name: 'Зомбі', hp: l => 40 + l * 18, dmg: l => 5 + l * 2.3, speed: 42, range: 26, cd: 1.6, aggro: 130, xp: l => 14 + l * 6, gold: [2, 5], blood: '#6a8a50',
     look: { skin: '#7d9a6a', armor: '#5a4a3a', armor2: '#46392c', trim: '#3a2f25', legs: '#3d352c', boots: '#2a2320', head: 'none', hair: '#2a2a20', armsFwd: 1, eyes: '#e0e070', rags: 1 } },
-  skeleton: { name: 'Скелет', hp: l => 55 + l * 20, dmg: l => 6 + l * 2.6, speed: 58, range: 28, cd: 1.4, aggro: 150, xp: l => 18 + l * 7, gold: [3, 8],
+  skeleton: { name: 'Скелет', hp: l => 55 + l * 20, dmg: l => 6 + l * 2.6, speed: 58, range: 28, cd: 1.4, aggro: 150, xp: l => 18 + l * 7, gold: [3, 8], blood: '#e2dccb',
     look: { skin: '#e2dccb', armor: '#e2dccb', armor2: '#c9c2ae', trim: '#8b7d6a', legs: '#d4cdb9', boots: '#d4cdb9', head: 'skull', weapon: 'rsword', bones: 1, rags: 1, eyes: '#ff5a3a' } },
-  ghost: { name: 'Привид', hp: l => 45 + l * 17, dmg: l => 7 + l * 2.6, speed: 52, range: 140, cd: 2.0, aggro: 170, xp: l => 22 + l * 8, gold: [4, 10], ranged: 1 },
-  boss: { name: 'Страж Склепу', hp: () => 1800, dmg: () => 32, speed: 56, range: 40, cd: 1.8, aggro: 200, xp: () => 900, gold: [150, 220], boss: 1,
-    look: { skin: '#e2dccb', armor: '#3a2f4a', armor2: '#271f33', trim: '#c9a0ff', legs: '#271f33', boots: '#1a1422', head: 'crown', weapon: 'bigaxe', eyes: '#c9a0ff', cape: '#3a1a55' } }
+  ghost: { name: 'Привид', draw: 'ghost', hp: l => 45 + l * 17, dmg: l => 7 + l * 2.6, speed: 52, range: 140, cd: 2.0, aggro: 170, xp: l => 22 + l * 8, gold: [4, 10], ranged: 1, pcol: '140,240,220', blood: '#b8f0e6' },
+  boss: { name: 'Страж Склепу', hp: () => 1800, dmg: () => 32, speed: 56, range: 40, cd: 1.8, aggro: 200, xp: () => 900, gold: [150, 220], boss: 1, scale: 1.55, blood: '#c9a0ff',
+    look: { skin: '#e2dccb', armor: '#3a2f4a', armor2: '#271f33', trim: '#c9a0ff', legs: '#271f33', boots: '#1a1422', head: 'crown', weapon: 'bigaxe', eyes: '#c9a0ff', cape: '#3a1a55' } },
+  // forest
+  wolf: { name: 'Вовк', draw: 'wolf', hp: l => 50 + l * 18, dmg: l => 6 + l * 2.4, speed: 82, range: 26, cd: 1.1, aggro: 165, xp: l => 20 + l * 7, gold: [3, 8], col: '#6d6862', col2: '#4e4a46', eye: '#ffd040', blood: '#8a2a2a' },
+  spider: { name: 'Павук', draw: 'spider', hp: l => 48 + l * 17, dmg: l => 7 + l * 2.5, speed: 70, range: 28, cd: 1.3, aggro: 150, xp: l => 22 + l * 7, gold: [4, 9], col: '#2a2230', col2: '#4a3a52', eye: '#ff3040', blood: '#7aff6a' },
+  spiderQueen: { name: 'Королева Павуків', draw: 'spider', hp: () => 2600, dmg: () => 45, speed: 60, range: 46, cd: 1.7, aggro: 210, xp: () => 2400, gold: [250, 350], boss: 1, scale: 2.3, col: '#3a1438', col2: '#8a2a7a', eye: '#ff40ff', blood: '#7aff6a' },
+  // ruins
+  deadKnight: { name: 'Мертвий лицар', hp: l => 70 + l * 22, dmg: l => 7 + l * 2.7, speed: 55, range: 30, cd: 1.5, aggro: 150, xp: l => 24 + l * 8, gold: [5, 11], blood: '#9a9aa8',
+    look: { skin: '#cfc8b4', armor: '#4a4e5a', armor2: '#33363f', trim: '#7a2a2a', legs: '#33363f', boots: '#222', head: 'helm', weapon: 'sword', shield: '#3a3d48', eyes: '#7ab0ff', cape: '#4a1a1a' } },
+  archer: { name: 'Скелет-лучник', hp: l => 50 + l * 18, dmg: l => 7 + l * 2.6, speed: 55, range: 150, cd: 2.0, aggro: 175, xp: l => 24 + l * 8, gold: [5, 11], ranged: 1, pcol: '230,220,190', blood: '#e2dccb',
+    look: { skin: '#e2dccb', armor: '#e2dccb', armor2: '#c9c2ae', trim: '#5a3a2a', legs: '#d4cdb9', boots: '#d4cdb9', head: 'skull', weapon: 'bow', bones: 1, rags: 1, eyes: '#7affd0' } },
+  ghostKnight: { name: 'Лицар-Привид', hp: () => 4500, dmg: () => 65, speed: 62, range: 44, cd: 1.6, aggro: 220, xp: () => 6000, gold: [500, 700], boss: 1, scale: 1.7, alpha: .78, blood: '#9ac8ff',
+    look: { skin: '#bfe0ff', armor: '#5a7ab8', armor2: '#3a5288', trim: '#cfe6ff', legs: '#3a5288', boots: '#2a3a66', head: 'helm', weapon: 'sword', shield: '#4a6aa8', eyes: '#ffffff', cape: '#2a3a7a' } },
+  // ice
+  yeti: { name: 'Йєті', hp: l => 90 + l * 24, dmg: l => 9 + l * 2.8, speed: 55, range: 30, cd: 1.6, aggro: 150, xp: l => 28 + l * 9, gold: [6, 13], scale: 1.3, blood: '#e8eef2',
+    look: { skin: '#9ab0c0', armor: '#e6edf2', armor2: '#c8d4dc', trim: '#c8d4dc', legs: '#d8e2e8', boots: '#b8c6d0', head: 'none', hair: '#f2f6f8', armsFwd: 1, eyes: '#2a4a6a', rags: 1 } },
+  iceElem: { name: 'Крижаний дух', draw: 'crystal', hp: l => 60 + l * 18, dmg: l => 8 + l * 2.7, speed: 50, range: 150, cd: 2.0, aggro: 175, xp: l => 28 + l * 9, gold: [6, 13], ranged: 1, pcol: '170,230,255', col: '#8fd4ff', col2: '#dff4ff', blood: '#bfeaff' },
+  frostGiant: { name: 'Крижаний Велетень', hp: () => 7000, dmg: () => 90, speed: 52, range: 50, cd: 2.0, aggro: 220, xp: () => 11000, gold: [900, 1200], boss: 1, scale: 2, blood: '#bfeaff',
+    look: { skin: '#86b6dc', armor: '#3a5a80', armor2: '#2a4060', trim: '#dff4ff', legs: '#2a4060', boots: '#1a2a40', head: 'horned', weapon: 'bigaxe', eyes: '#dff4ff', beard: 1 } },
+  // volcano
+  imp: { name: 'Біс', hp: l => 60 + l * 18, dmg: l => 9 + l * 2.8, speed: 70, range: 145, cd: 1.8, aggro: 175, xp: l => 32 + l * 10, gold: [7, 15], ranged: 1, pcol: '255,130,40', scale: .85, blood: '#ff7a2a',
+    look: { skin: '#c8402a', armor: '#5a1a12', armor2: '#3a100a', trim: '#ffb040', legs: '#5a1a12', boots: '#2a0a06', head: 'horned', eyes: '#ffe040', rags: 1 } },
+  demon: { name: 'Демон', hp: l => 100 + l * 26, dmg: l => 10 + l * 3, speed: 60, range: 32, cd: 1.5, aggro: 160, xp: l => 34 + l * 10, gold: [8, 16], scale: 1.25, blood: '#ff5a2a',
+    look: { skin: '#8a2a1a', armor: '#3a1a14', armor2: '#2a100c', trim: '#ff7a2a', legs: '#2a100c', boots: '#1a0806', head: 'horned', weapon: 'axe', eyes: '#ffcc33', cape: '#5a1408' } },
+  flameLord: { name: 'Володар Полум\'я', hp: () => 11000, dmg: () => 120, speed: 58, range: 52, cd: 1.8, aggro: 230, xp: () => 25000, gold: [2000, 3000], boss: 1, scale: 2.1, blood: '#ffb040', fiery: 1,
+    look: { skin: '#ff8a3a', armor: '#5a1a0a', armor2: '#3a0e04', trim: '#ffd040', legs: '#3a0e04', boots: '#1a0602', head: 'crown', weapon: 'bigaxe', eyes: '#fff6a0', cape: '#c03a0a' } }
 };
 const enemies = [];
 function spawnEnemy(type, lvl, tx, ty) {
   const d = ETYPES[type];
   const e = { kind: 'enemy', type, lvl, x: tc(tx), y: tc(ty), hx: tc(tx), hy: tc(ty), maxHp: Math.round(d.hp(lvl)), dmg: d.dmg(lvl), speed: d.speed, range: d.range,
-    cd: d.cd, atkT: rnd(0, 1), state: 'idle', wT: rnd(1, 4), wx: 0, wy: 0, walk: rnd(0, 6), face: 1, dead: false, respawn: 0, aggro: null, dot: null, slow: 0, stun: 0, flash: 0, atkAnim: -1, slamT: 6, cr: d.boss ? 10 : 7, scale: d.boss ? 1.55 : 1 };
+    cd: d.cd, atkT: rnd(0, 1), state: 'idle', wT: rnd(1, 4), wx: 0, wy: 0, walk: rnd(0, 6), face: 1, dead: false, respawn: 0, aggro: null, dot: null, slow: 0, stun: 0, flash: 0, atkAnim: -1, slamT: 6,
+    cr: d.boss ? 10 : 7, scale: d.scale || 1 };
   e.hp = e.maxHp; e.name = d.name; enemies.push(e); return e;
 }
 function placeSpawns() {
+  enemies.length = 0;
   const pick = (p, rmin, rmax, n, cb) => {
     let tries = 0, c = 0;
     while (c < n && tries++ < 3000) {
       const a = Math.random() * Math.PI * 2, r = rnd(rmin, rmax), x = Math.round(p.tx + Math.cos(a) * r), y = Math.round(p.ty + Math.sin(a) * r);
       if (!inb(x, y) || S[idx(x, y)] || G[idx(x, y)] === WATER) continue;
-      if (tdist(x, y, CAMP) < 9) continue;
-      cb(x, y, c); c++;
+      if (tdist(x, y, CAMP) < 9 || tdist(x, y, ARENA) < 8) continue;
+      if (portals.some(o => tdist(x, y, o) < 4)) continue;
+      cb(x, y); c++;
     }
   };
-  pick(CAMP, 10, 24, 20, (x, y) => spawnEnemy('zombie', rndi(1, 3), x, y));
-  pick(GRAVE, 2, 9, 15, (x, y) => spawnEnemy('skeleton', rndi(3, 6), x, y));
-  pick(SWAMP, 2, 12, 13, (x, y) => spawnEnemy('ghost', rndi(5, 8), x, y));
-  pick({ tx: CRYPT.tx - 10, ty: CRYPT.ty }, 1, 4, 5, (x, y) => spawnEnemy('skeleton', rndi(7, 9), x, y));
-  spawnEnemy('boss', 12, CRYPT.tx + 2, CRYPT.ty);
+  for (const z of M.zones) for (const [type, l0, l1, n] of z.spawn) {
+    if (z.ring) pick(CAMP, 10, 24, n, (x, y) => spawnEnemy(type, rndi(l0, l1), x, y));
+    else pick(z, 1, z.r - 1, n, (x, y) => spawnEnemy(type, rndi(l0, l1), x, y));
+  }
+  const A = ARENA, [bt, bl] = A.boss;
+  if (A.open === 'w') spawnEnemy(bt, bl, A.tx + 2, A.ty); else spawnEnemy(bt, bl, A.tx, A.ty - 2);
 }
+function loadMap(id) { genWorld(MAPS[id]); renderGround(); placeSpawns(); }
 
 // ============ game state ============
 let state = 'menu', P = null, minion = null, npcs = [];
 const projs = [], parts = [], floats = [], rings = [], teles = [];
 let camX = 0, camY = 0, time = 0, markT = 0, mark = null;
-const QUESTS = [
-  { t: 'Мертві біля табору', d: 'Знищ зомбі навколо табору', type: 'zombie', n: 6, xp: 90, gold: 20, at: CAMP },
-  { t: 'Неспокійне кладовище', d: 'Скелети на північному сході', type: 'skeleton', n: 8, xp: 300, gold: 50, at: GRAVE },
-  { t: 'Болото привидів', d: 'Привиди на південному заході', type: 'ghost', n: 6, xp: 600, gold: 90, at: SWAMP },
-  { t: 'Страж Склепу', d: 'Здолай володаря склепу на сході', type: 'boss', n: 1, xp: 1500, gold: 300, at: CRYPT }
-];
+function zoneAt(z) { if (z === 'camp') return CAMP; if (z === 'arena') return ARENA; if (typeof z === 'string' && z[0] === 'p') return portals[+z.slice(1)] || CAMP; return M.zones[z] || CAMP; }
 function questFor(i) {
-  if (i < QUESTS.length) return QUESTS[i];
-  const k = i - QUESTS.length, types = ['zombie', 'skeleton', 'ghost'], at = [CAMP, GRAVE, SWAMP], ty = types[k % 3];
-  return { t: 'Полювання ' + (k + 1), d: 'Очисти землі: ' + ETYPES[ty].name.toLowerCase(), type: ty, n: 10, xp: 400 + k * 80, gold: 60 + k * 10, at: at[k % 3] };
+  const Q = M.quests;
+  if (i < Q.length) { const q = Q[i]; return Object.assign({}, q, { at: zoneAt(q.z) }); }
+  const k = i - Q.length, h = M.hunt[k % M.hunt.length], ty = h[0];
+  return { t: 'Полювання ' + (k + 1), d: 'Очисти землі: ' + ETYPES[ty].name.toLowerCase(), type: ty, n: 10, xp: Math.round(ETYPES[ty].xp(20) * (k < 3 ? 4 : 5)), gold: 60 + k * 15, at: zoneAt(h[1]) };
 }
 const xpNeed = l => Math.floor(60 * Math.pow(l, 1.65));
 const lvlMult = l => 1 + (l - 1) * .11;
 
+function syncQuest(save) {
+  // swap per-map quest progress in/out of P.questIdx / P.qprog
+  if (save) P.qs[save] = { i: P.questIdx, p: P.qprog };
+  const s = P.qs[M.id] || { i: 0, p: 0 }; P.questIdx = s.i; P.qprog = s.p;
+}
 function makePlayer(d) {
   const C = CLASSES[d.cls];
   P = { kind: 'player', clsId: d.cls, C, faction: C.faction, name: d.name, lvl: d.lvl || 1, xp: d.xp || 0, gold: d.gold || 0, hpPot: d.hpPot != null ? d.hpPot : 3, mpPot: d.mpPot != null ? d.mpPot : 2,
-    questIdx: d.quest || 0, qprog: d.qprog || 0, x: tc(CAMP.tx), y: tc(CAMP.ty) + 70, face: 1, back: false, walk: 0, moving: false, cds: [0, 0, 0, 0], buffs: {}, target: null, path: null, autoAtk: false,
-    pending: -1, talkTo: null, atkAnim: -1, stun: 0, dead: false, combatT: 99, dash: null, flash: 0, cr: 7, slow: 0 };
+    qs: d.qs || { cursed: { i: d.quest || 0, p: d.qprog || 0 } }, questIdx: 0, qprog: 0,
+    x: tc(CAMP.tx), y: tc(CAMP.ty) + 70, face: 1, back: false, walk: 0, moving: false, cds: [0, 0, 0, 0], buffs: {}, target: null, path: null, autoAtk: false,
+    pending: -1, talkTo: null, atkAnim: -1, stun: 0, dead: false, combatT: 99, dash: null, flash: 0, cr: 7, slow: 0, portalLock: true };
+  syncQuest();
   if (d.x && d.y && canStand(d.x, d.y, 7)) { P.x = d.x; P.y = d.y; }
   recalc(); P.hp = P.maxHp; P.mp = P.maxMp;
+  makeNpcs();
+}
+function makeNpcs() {
   const F = FACTION[P.faction];
   npcs = [
     { kind: 'npc', role: 'elder', name: F.elder, x: tc(CAMP.tx) - 58, y: tc(CAMP.ty) + 26, face: 1,
@@ -582,6 +889,20 @@ function makePlayer(d) {
       look: P.faction === 'light' ? { skin: '#e6b894', armor: '#7a3b2a', armor2: '#5a2a1d', trim: '#e8c170', legs: '#4a3a2a', boots: '#2a1d14', head: 'none', hair: '#6a3a1a', robe: 1 }
         : { skin: '#8a9a88', armor: '#3d3a33', armor2: '#2a2822', trim: '#8a7a5a', legs: '#2a2822', boots: '#1a1612', head: 'hood', robe: 1, eyes: '#e0e070' } }
   ];
+}
+function changeMap(id, from) {
+  const cur = questFor(P.questIdx);
+  if (cur.type === 'none') { P.questIdx++; P.qprog = 0; }
+  P.qs[from] = { i: P.questIdx, p: P.qprog };
+  loadMap(id); syncQuest(); makeNpcs();
+  const back = portals.find(p => p.to === from);
+  let px = tc(CAMP.tx), py = tc(CAMP.ty) + 70;
+  if (back) { const dx = tc(CAMP.tx) - back.x, dy = tc(CAMP.ty) - back.y, l = Math.hypot(dx, dy) || 1; const nx = back.x + dx / l * 56, ny = back.y + dy / l * 56; if (canStand(nx, ny, 7)) { px = nx; py = ny; } }
+  P.x = px; P.y = py; P.portalLock = true; P.path = null; P.target = null; P.autoAtk = false; P.pending = -1; P.talkTo = null; P.dash = null;
+  if (minion) { minion.x = P.x; minion.y = P.y; minion.target = null; }
+  projs.length = 0; teles.length = 0; parts.length = 0; floats.length = 0;
+  burst(P.x, P.y - 14, 'rgb(' + M.portalCol + ')', 30, 80, .8, 3, -30);
+  toast(M.name + ' · рівні ' + M.lv); writeSave();
 }
 function recalc() {
   const C = P.C, m = lvlMult(P.lvl);
@@ -593,7 +914,8 @@ const SAVE_KEY = 'tcl_browser_save_v1';
 function loadSave() { try { const s = localStorage.getItem(SAVE_KEY); return s ? JSON.parse(s) : null; } catch (e) { return null; } }
 function writeSave() {
   if (!P) return;
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ cls: P.clsId, name: P.name, lvl: P.lvl, xp: P.xp, gold: P.gold, hpPot: P.hpPot, mpPot: P.mpPot, quest: P.questIdx, qprog: P.qprog, x: Math.round(P.x), y: Math.round(P.y) })); } catch (e) { }
+  P.qs[M.id] = { i: P.questIdx, p: P.qprog };
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ cls: P.clsId, name: P.name, lvl: P.lvl, xp: P.xp, gold: P.gold, hpPot: P.hpPot, mpPot: P.mpPot, qs: P.qs, map: M.id, x: Math.round(P.x), y: Math.round(P.y) })); } catch (e) { }
 }
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (e) { } }
 
@@ -620,15 +942,15 @@ function hitEnemy(e, amt, src, crit, col) {
   if (e.hp <= 0) killEnemy(e);
 }
 function killEnemy(e) {
-  e.dead = true; e.hp = 0; e.respawn = e.type === 'boss' ? 90 : rnd(16, 24);
-  const D = ETYPES[e.type];
-  burst(e.x, e.y - 14, e.type === 'ghost' ? '#b8f0e6' : (e.type === 'zombie' ? '#6a8a50' : '#e2dccb'), e.type === 'boss' ? 40 : 14, 80, .8, 3, 120);
+  e.dead = true; e.hp = 0; const D = ETYPES[e.type];
+  e.respawn = D.boss ? 90 : rnd(16, 24);
+  burst(e.x, e.y - 14, D.blood || '#e2dccb', D.boss ? 40 : 14, 80, .8, 3, 120);
   if (P.target === e) { P.target = null; P.autoAtk = false; P.pending = -1; }
   if (minion && minion.target === e) minion.target = null;
   const diff = P.lvl - e.lvl; const mult = diff > 5 ? .15 : diff > 3 ? .5 : 1;
   gainXp(Math.round(D.xp(e.lvl) * mult));
   const g = rndi(D.gold[0], D.gold[1]) + Math.floor(e.lvl / 2); P.gold += g; floatTxt(e.x, e.y - 50, '+' + g + ' 🪙', '#e8c170', 12);
-  if (Math.random() < (e.type === 'boss' ? 1 : .08)) { if (Math.random() < .6) P.hpPot++; else P.mpPot++; floatTxt(e.x, e.y - 64, '+зілля', '#ff8aa0', 12); }
+  if (Math.random() < (D.boss ? 1 : .08)) { if (Math.random() < .6) P.hpPot++; else P.mpPot++; floatTxt(e.x, e.y - 64, '+зілля', '#ff8aa0', 12); }
   const q = questFor(P.questIdx);
   if (q.type === e.type && P.qprog < q.n) {
     P.qprog++;
@@ -849,6 +1171,16 @@ function updatePlayer(dt) {
       if (!p.path || !p.path.length) p.path = null;
     }
     if (p.talkTo && dist(p, p.talkTo) < 50) { const n = p.talkTo; p.talkTo = null; p.path = null; openNpc(n); }
+    let nearP = false;
+    for (const o of portals) {
+      const d = Math.hypot(p.x - o.x, p.y - (o.y - 8));
+      if (d < 40) nearP = true;
+      if (d < 18 && !p.portalLock) {
+        if (p.lvl < o.lvl) { if (!p.portalWarn) { toast(MAPS[o.to].name + ' — потрібен ' + o.lvl + ' рівень'); p.portalWarn = 1; } }
+        else { changeMap(o.to, M.id); return; }
+      }
+    }
+    if (!nearP) { p.portalLock = false; p.portalWarn = 0; }
   }
   p.moving = moved > .05;
   if (p.moving) p.walk += dt * 11; else p.walk += dt * 2;
@@ -875,14 +1207,14 @@ function updateEnemies(dt) {
       if (!tgtAlive(t) || leash || (t === P && inCamp(P)) || inCamp(e)) { e.state = 'return'; e.aggro = null; }
       else {
         const d = dist(e, t);
-        if (D.boss) { e.slamT -= dt; if (e.slamT <= 0 && d < 160) { e.slamT = rnd(6, 8); teles.push({ x: t.x, y: t.y, r: 72, t: 0, max: 1.2, dmg: e.dmg * 1.8 }); toast('Страж готує удар! Відійди!'); } }
+        if (D.boss) { e.slamT -= dt; if (e.slamT <= 0 && d < 160) { e.slamT = rnd(6, 8); teles.push({ x: t.x, y: t.y, r: 72, t: 0, max: 1.2, dmg: e.dmg * 1.8 }); toast(e.name + ' готує удар! Відійди!'); } }
         if (d > e.range) { moved = moveTowards(e, t.x, t.y, spd, dt, e.range - 4); if (moved < spd * dt * .2) { e.stuckT = (e.stuckT || 0) + dt; if (e.stuckT > 2) { e.state = 'return'; e.aggro = null; e.stuckT = 0; } } else e.stuckT = 0; }
         else {
           setFacing(e, t.x - e.x, 0);
           e.atkT -= dt;
           if (e.atkT <= 0) {
             e.atkT = e.cd; e.atkAnim = 0;
-            if (D.ranged) projs.push({ x: e.x, y: e.y - 20, t, spd: 190, dmg: e.dmg, col: '140,240,220', owner: e });
+            if (D.ranged) projs.push({ x: e.x, y: e.y - 20, t, spd: 190, dmg: e.dmg, col: D.pcol || '140,240,220', owner: e });
             else if (t === P) hitPlayer(e.dmg, e); else { t.hp -= Math.round(e.dmg); t.flash = .12; floatTxt(t.x, t.y - 30, '-' + Math.round(e.dmg), '#ff9a8a', 12); }
           }
         }
@@ -970,7 +1302,7 @@ function render() {
   ctx.drawImage(mapCv, sx, sy, sw, sh, sx, sy, sw, sh);
   ctx.imageSmoothingEnabled = true;
   // water shimmer
-  ctx.fillStyle = 'rgba(140,200,220,.08)';
+  ctx.fillStyle = M.liquid === 'lava' ? 'rgba(255,220,120,.35)' : M.liquid === 'ice' ? 'rgba(255,255,255,.18)' : 'rgba(140,200,220,.08)';
   const tx0 = Math.floor(camX / T), ty0 = Math.floor(camY / T), tx1 = Math.ceil((camX + vw) / T), ty1 = Math.ceil((camY + vh) / T);
   for (let y = ty0; y <= ty1; y++) for (let x = tx0; x <= tx1; x++) { if (!inb(x, y) || G[idx(x, y)] !== WATER) continue; const o = (Math.sin(time * 1.5 + x * 1.3 + y * .7) + 1) * 10; ctx.fillRect(x * T + 4 + o * .5, y * T + 8 + ((x * 7 + y * 3) % 14), 8, 1.5); }
   // telegraphs
@@ -998,7 +1330,7 @@ function render() {
   // health bars / names / floats (above lighting)
   for (const e of enemies) {
     if (e.dead || e.x < camX - 40 || e.x > camX + vw + 40 || e.y < camY - 40 || e.y > camY + vh + 80) continue;
-    const top = e.y - (e.type === 'ghost' ? 42 : 40) * e.scale;
+    const top = e.y - (ETYPES[e.type].draw === 'ghost' ? 42 : ETYPES[e.type].draw === 'wolf' || ETYPES[e.type].draw === 'spider' ? 28 : 40) * e.scale;
     if (e.hp < e.maxHp || P && P.target === e || ETYPES[e.type].boss) {
       const w = e.scale > 1 ? 40 : 26; ctx.fillStyle = '#000'; ctx.fillRect(e.x - w / 2 - 1, top - 1, w + 2, 5); ctx.fillStyle = '#c0392b'; ctx.fillRect(e.x - w / 2, top, w * e.hp / e.maxHp, 3);
     }
@@ -1006,6 +1338,7 @@ function render() {
   }
   if (state !== 'menu') {
     ctx.font = 'bold 9px Philosopher, serif'; ctx.textAlign = 'center';
+    for (const o of portals) { const lk = P && P.lvl < o.lvl, t1 = '→ ' + MAPS[o.to].name, t2 = lk ? 'з ' + o.lvl + ' рівня' : 'рівні ' + MAPS[o.to].lv; ctx.fillStyle = '#000'; ctx.fillText(t1, o.x + .7, o.y - 70.3); ctx.fillStyle = 'rgb(' + o.col + ')'; ctx.fillText(t1, o.x, o.y - 71); ctx.fillStyle = '#000'; ctx.fillText(t2, o.x + .7, o.y - 60.3); ctx.fillStyle = lk ? '#ff7a6a' : '#ffe7b0'; ctx.fillText(t2, o.x, o.y - 61); }
     for (const n of npcs) { ctx.fillStyle = '#000'; ctx.fillText(n.name, n.x + .7, n.y - 44.3); ctx.fillStyle = '#ffd97a'; ctx.fillText(n.name, n.x, n.y - 45); ctx.font = 'bold 13px sans-serif'; ctx.fillText(n.role === 'elder' ? '❗' : '🪙', n.x, n.y - 56 + Math.sin(time * 3) * 2); ctx.font = 'bold 9px Philosopher, serif'; }
     if (P && !P.dead) { ctx.fillStyle = '#000'; ctx.fillText(P.name, P.x + .7, P.y - 44.3); ctx.fillStyle = P.faction === 'light' ? '#9fc3ff' : '#9fe7a8'; ctx.fillText(P.name, P.x, P.y - 45); }
     // quest arrow
@@ -1022,7 +1355,7 @@ function drawLighting(vw, vh) {
   if (lightCv.width !== lw || lightCv.height !== lh) { lightCv.width = lw; lightCv.height = lh; }
   const L = lctx, s = zoom / 2;
   L.globalCompositeOperation = 'source-over'; L.clearRect(0, 0, lw, lh);
-  L.fillStyle = 'rgba(12,6,28,.5)'; L.fillRect(0, 0, lw, lh);
+  L.fillStyle = 'rgba(' + M.tint + ',' + M.dark + ')'; L.fillRect(0, 0, lw, lh);
   L.globalCompositeOperation = 'destination-out';
   const hole = (x, y, r, a) => { const X = (x - camX) * s, Y = (y - camY) * s, Rr = r * s; if (X < -Rr || Y < -Rr || X > lw + Rr || Y > lh + Rr) return; const g = L.createRadialGradient(X, Y, 0, X, Y, Rr); g.addColorStop(0, 'rgba(0,0,0,' + a + ')'); g.addColorStop(1, 'rgba(0,0,0,0)'); L.fillStyle = g; L.fillRect(X - Rr, Y - Rr, Rr * 2, Rr * 2); };
   if (P && state !== 'menu') hole(P.x, P.y - 14, 210, .85); else hole(camX + vw / 2, camY + vh / 2, 400, .7);
@@ -1051,8 +1384,15 @@ function drawThing(it) {
   }
   if (it.kind === 'enemy') {
     const a = it.flash > 0 ? .55 : 1;
-    if (it.type === 'ghost') drawGhost(c, it.x, it.y, time + it.hx, 1, .85 * a);
-    else drawHumanoid(c, it.x, it.y, { look: ETYPES[it.type].look, face: it.face, back: it.back, walk: it.walk, moving: it.moving, atk: it.atkAnim, alpha: a, scale: it.scale });
+    const D = ETYPES[it.type];
+    if (D.draw === 'ghost') drawGhost(c, it.x, it.y, time + it.hx, 1, .85 * a);
+    else if (D.draw === 'wolf') drawWolf(c, it.x, it.y, { D, face: it.face, walk: it.walk, moving: it.moving, atk: it.atkAnim, alpha: a, scale: it.scale });
+    else if (D.draw === 'spider') drawSpider(c, it.x, it.y, { D, face: it.face, walk: it.walk, moving: it.moving, atk: it.atkAnim, alpha: a, scale: it.scale });
+    else if (D.draw === 'crystal') drawCrystal(c, it.x, it.y, { D, t: time + it.hx, alpha: a, scale: it.scale });
+    else {
+      if (D.fiery && Math.random() < .5) parts.push({ x: it.x + rnd(-14, 14), y: it.y - rnd(10, 60), vx: rnd(-10, 10), vy: -50, life: .7, max: .7, col: Math.random() < .5 ? '#ffb040' : '#ff5a1a', size: 2.5, grav: 0 });
+      drawHumanoid(c, it.x, it.y, { look: D.look, face: it.face, back: it.back, walk: it.walk, moving: it.moving, atk: it.atkAnim, alpha: a * (D.alpha || 1), scale: it.scale });
+    }
     if (it.dot) { c.fillStyle = 'rgba(109,255,138,.25)'; ell(c, it.x, it.y - 16 * it.scale, 12 * it.scale, 16 * it.scale); }
     if (it.stun > 0) { c.fillStyle = '#ffd54a'; for (let k = 0; k < 3; k++) { const a2 = time * 5 + k * 2.1; circ(c, it.x + Math.cos(a2) * 8, it.y - 42 * it.scale + Math.sin(a2) * 3, 1.6); } }
     if (it.slow > 0) { c.fillStyle = 'rgba(160,230,255,.3)'; ell(c, it.x, it.y - 2, 12, 4); }
@@ -1067,6 +1407,13 @@ function drawThing(it) {
     case 'pine': s = SPR['pine' + Math.floor(it.v * 2)]; break;
     case 'rock': s = SPR['rock' + Math.floor(it.v * 2)]; break;
     case 'grave': s = SPR['grave' + Math.floor(it.v * 2)]; break;
+    case 'oak': s = SPR['oak' + Math.floor(it.v * 3)]; break;
+    case 'spine': s = SPR['spine' + Math.floor(it.v * 2)]; break;
+    case 'char': s = SPR['char' + Math.floor(it.v * 2)]; break;
+    case 'icerock': s = SPR['icerock' + Math.floor(it.v * 2)]; break;
+    case 'obsidian': s = SPR['obsidian' + Math.floor(it.v * 2)]; break;
+    case 'ruinwall': s = SPR['ruinwall' + Math.floor(it.v * 2)]; break;
+    case 'portal': return drawPortal(it);
     case 'fire': return drawFire(it);
     case 'banner': return drawBanner(it);
     default: s = SPR[it.type];
@@ -1110,7 +1457,8 @@ function drawMinimap() {
   mmc.fillStyle = '#ffd54a'; const qx = (q.at.tx - cx) * sc, qy = (q.at.ty - cy) * sc;
   if (qx > 0 && qy > 0 && qx < mm.width && qy < mm.height) { mmc.font = 'bold 10px sans-serif'; mmc.textAlign = 'center'; mmc.fillText('!', qx, qy + 4); }
   mmc.fillStyle = '#ff5a4a';
-  for (const e of enemies) { if (e.dead) continue; const x = (e.x / T - cx) * sc, y = (e.y / T - cy) * sc; if (x < 0 || y < 0 || x > mm.width || y > mm.height) continue; mmc.fillRect(x - 1, y - 1, e.type === 'boss' ? 4 : 2, e.type === 'boss' ? 4 : 2); }
+  for (const e of enemies) { if (e.dead) continue; const x = (e.x / T - cx) * sc, y = (e.y / T - cy) * sc; if (x < 0 || y < 0 || x > mm.width || y > mm.height) continue; const b = ETYPES[e.type].boss; mmc.fillRect(x - 1, y - 1, b ? 4 : 2, b ? 4 : 2); }
+  mmc.fillStyle = '#c9a0ff'; for (const o of portals) mmc.fillRect((o.tx - cx) * sc - 2, (o.ty - cy) * sc - 2, 4, 4);
   mmc.fillStyle = '#e8c170'; mmc.fillRect((CAMP.tx - cx) * sc - 2, (CAMP.ty - cy) * sc - 2, 4, 4);
   mmc.fillStyle = '#fff'; mmc.beginPath(); mmc.arc((P.x / T - cx) * sc, (P.y / T - cy) * sc, 2.5, 0, 6.29); mmc.fill();
 }
@@ -1144,7 +1492,8 @@ function updateHud() {
   const t = P.target;
   if (alive(t)) { $('tFrame').hidden = false; setTxt('tName', t.name); setTxt('tLvl', ' ' + t.lvl); setW('tHp', t.hp / t.maxHp); setTxt('tHpT', Math.ceil(t.hp) + ' / ' + t.maxHp); }
   else $('tFrame').hidden = true;
-  const q = questFor(P.questIdx); setTxt('qT', q.t); setTxt('qD', q.d); setTxt('qP', P.qprog + ' / ' + q.n);
+  setTxt('qL', '📍 ' + M.name);
+  const q = questFor(P.questIdx); setTxt('qT', q.t); setTxt('qD', q.d); setTxt('qP', q.type === 'none' ? '' : P.qprog + ' / ' + q.n);
   const btns = $('skills').children;
   P.C.skills.forEach((sk, i) => {
     const b = btns[i]; if (!b) return; const cd = P.cds[i], f = cd > 0 ? cd / sk.cd : 0;
@@ -1235,10 +1584,10 @@ $('bStart').addEventListener('click', () => {
 });
 
 function startGame(d) {
+  loadMap(d.map && MAPS[d.map] ? d.map : 'cursed');
   makePlayer(d); minion = null; projs.length = 0; teles.length = 0;
-  for (const e of enemies) { e.dead = false; e.hp = e.maxHp; e.x = e.hx; e.y = e.hy; e.state = 'idle'; e.aggro = null; e.dot = null; e.stun = 0; }
   state = 'game'; show(''); $('hud').hidden = false; $('death').hidden = true; closeDialog(); buildSkillBar(); writeSave();
-  toast(FACTION[P.faction].camp + ' — поговори зі старійшиною ❗');
+  toast(M.name + ' · ' + FACTION[P.faction].camp + ' — поговори зі старійшиною ❗');
 }
 function toMenu() { state = 'menu'; $('hud').hidden = true; $('death').hidden = true; refreshTitle(); show('scrTitle'); P = null; minion = null; }
 
@@ -1264,7 +1613,7 @@ addEventListener('visibilitychange', () => { if (document.hidden) writeSave(); }
 addEventListener('pagehide', writeSave);
 
 // ============ boot ============
-resize(); genWorld(); buildSprites(); renderGround(); placeSpawns(); refreshTitle();
+resize(); buildSprites(); buildSprites2(); loadMap('cursed'); refreshTitle();
 requestAnimationFrame(frame);
-window.__game = { get P() { return P; }, enemies, useSkill, worldTap, get state() { return state; } };
+window.__game = { get P() { return P; }, get M() { return M; }, portals, changeMap, enemies, useSkill, worldTap, get state() { return state; } };
 })();
