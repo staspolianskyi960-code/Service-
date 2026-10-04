@@ -50,14 +50,14 @@ const MAPS = {
       { ring: 1, spawn: [['zombie', 1, 3, 20]] },
       { tx: 76, ty: 40, r: 4, spawn: [['skeleton', 7, 9, 5]] }],
     arena: { tx: 86, ty: 40, open: 'w', boss: ['boss', 12], col: '170,80,255' },
-    portals: [{ tx: 44, ty: 4, to: 'forest', lvl: 7 }],
+    portals: [{ tx: 44, ty: 4, to: 'forest', lvl: 1 }],
     extra: [[58, 66], [8, 30]],
     quests: [
       { t: 'Мертві біля табору', d: 'Знищ зомбі навколо табору', type: 'zombie', n: 6, xp: 90, gold: 20, z: 'camp' },
       { t: 'Неспокійне кладовище', d: 'Скелети на північному сході', type: 'skeleton', n: 8, xp: 300, gold: 50, z: 0 },
       { t: 'Болото привидів', d: 'Привиди на південному заході', type: 'ghost', n: 6, xp: 600, gold: 90, z: 1 },
       { t: 'Страж Склепу', d: 'Здолай володаря склепу на сході', type: 'boss', n: 1, xp: 1500, gold: 300, z: 'arena' },
-      { t: 'Шлях на північ', d: 'Портал на півночі веде до Зачарованого Лісу (7 рів.)', type: 'none', n: 1, xp: 0, gold: 0, z: 'p0' }],
+      { t: 'Шлях на північ', d: 'Портал на півночі веде до Зачарованого Лісу', type: 'none', n: 1, xp: 0, gold: 0, z: 'p0' }],
     hunt: [['zombie', 'camp'], ['skeleton', 0], ['ghost', 1]]
   },
   forest: {
@@ -70,13 +70,13 @@ const MAPS = {
       { tx: 72, ty: 38, r: 11, kind: 'webs', spawn: [['spider', 10, 12, 16]] },
       { ring: 1, spawn: [['wolf', 7, 8, 9]] }],
     arena: { tx: 74, ty: 12, open: 's', boss: ['spiderQueen', 16], col: '200,80,220' },
-    portals: [{ tx: 48, ty: 67, to: 'cursed', lvl: 1 }, { tx: 14, ty: 5, to: 'ruins', lvl: 12 }],
+    portals: [{ tx: 48, ty: 67, to: 'cursed', lvl: 1 }, { tx: 14, ty: 5, to: 'ruins', lvl: 1 }],
     extra: [[40, 22]],
     quests: [
       { t: 'Вовча зграя', d: 'Перебий вовків на заході лісу', type: 'wolf', n: 8, xp: 1100, gold: 120, z: 0 },
       { t: 'Павутиння', d: 'Знищ павуків на сході', type: 'spider', n: 8, xp: 1500, gold: 150, z: 1 },
       { t: 'Королева павуків', d: 'Гніздо на північному сході', type: 'spiderQueen', n: 1, xp: 4000, gold: 500, z: 'arena' },
-      { t: 'До руїн', d: 'Портал на північному заході (12 рів.)', type: 'none', n: 1, xp: 0, gold: 0, z: 'p1' }],
+      { t: 'До руїн', d: 'Портал на північному заході', type: 'none', n: 1, xp: 0, gold: 0, z: 'p1' }],
     hunt: [['wolf', 0], ['spider', 1]]
   },
   ruins: {
@@ -89,13 +89,13 @@ const MAPS = {
       { tx: 72, ty: 42, r: 10, kind: 'ruins', spawn: [['archer', 13, 15, 14]] },
       { ring: 1, spawn: [['deadKnight', 11, 12, 8]] }],
     arena: { tx: 46, ty: 14, open: 's', boss: ['ghostKnight', 20], col: '120,170,255' },
-    portals: [{ tx: 48, ty: 67, to: 'forest', lvl: 1 }, { tx: 85, ty: 6, to: 'ice', lvl: 16 }],
+    portals: [{ tx: 48, ty: 67, to: 'forest', lvl: 1 }, { tx: 85, ty: 6, to: 'ice', lvl: 1 }],
     extra: [[14, 14]],
     quests: [
       { t: 'Мертва варта', d: 'Знищ мертвих лицарів на заході', type: 'deadKnight', n: 8, xp: 2600, gold: 200, z: 0 },
       { t: 'Стріли з мурів', d: 'Скелети-лучники на сході', type: 'archer', n: 8, xp: 3000, gold: 220, z: 1 },
       { t: 'Лицар-Привид', d: 'Цитадель на півночі', type: 'ghostKnight', n: 1, xp: 8000, gold: 800, z: 'arena' },
-      { t: 'У гори', d: 'Портал на північному сході (16 рів.)', type: 'none', n: 1, xp: 0, gold: 0, z: 'p1' }],
+      { t: 'У гори', d: 'Портал на північному сході', type: 'none', n: 1, xp: 0, gold: 0, z: 'p1' }],
     hunt: [['deadKnight', 0], ['archer', 1]]
   },
   ice: {
@@ -108,13 +108,13 @@ const MAPS = {
       { tx: 72, ty: 36, r: 11, kind: 'icefield', spawn: [['iceElem', 17, 19, 14]] },
       { ring: 1, spawn: [['yeti', 15, 16, 8]] }],
     arena: { tx: 58, ty: 12, open: 's', boss: ['frostGiant', 24], col: '140,220,255' },
-    portals: [{ tx: 48, ty: 67, to: 'ruins', lvl: 1 }, { tx: 12, ty: 6, to: 'volcano', lvl: 20 }],
+    portals: [{ tx: 48, ty: 67, to: 'ruins', lvl: 1 }, { tx: 12, ty: 6, to: 'volcano', lvl: 1 }],
     extra: [],
     quests: [
       { t: 'Снігові звірі', d: 'Йєті на заході', type: 'yeti', n: 8, xp: 5000, gold: 300, z: 0 },
       { t: 'Живий лід', d: 'Крижані духи на сході', type: 'iceElem', n: 8, xp: 5600, gold: 330, z: 1 },
       { t: 'Крижаний Велетень', d: 'Вершина на півночі', type: 'frostGiant', n: 1, xp: 14000, gold: 1200, z: 'arena' },
-      { t: 'У вогонь', d: 'Портал на північному заході (20 рів.)', type: 'none', n: 1, xp: 0, gold: 0, z: 'p1' }],
+      { t: 'У вогонь', d: 'Портал на північному заході', type: 'none', n: 1, xp: 0, gold: 0, z: 'p1' }],
     hunt: [['yeti', 0], ['iceElem', 1]]
   },
   volcano: {
