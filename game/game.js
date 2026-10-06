@@ -1015,7 +1015,7 @@ function spawnEnemy(type, lvl, tx, ty) {
   const e = { kind: 'enemy', type, lvl, x: tc(tx), y: tc(ty), hx: tc(tx), hy: tc(ty), maxHp: Math.round(d.hp(lvl)), dmg: d.dmg(lvl), speed: d.speed, range: d.range,
     cd: d.cd, atkT: rnd(0, 1), state: 'idle', wT: rnd(1, 4), wx: 0, wy: 0, walk: rnd(0, 6), face: 1, dead: false, respawn: 0, aggro: null, dot: null, slow: 0, stun: 0, flash: 0, atkAnim: -1, slamT: 6,
     cr: d.boss ? 10 : 7, scale: d.scale || 1 };
-  e.hp = e.maxHp; e.name = d.name; enemies.push(e); return e;
+  e.hp = e.maxHp; e.name = d.name; e.id = ++enemySeq; enemies.push(e); return e;
 }
 function placeSpawns() {
   enemies.length = 0;
@@ -1036,7 +1036,7 @@ function placeSpawns() {
   const A = ARENA, [bt, bl] = A.boss;
   if (A.open === 'w') spawnEnemy(bt, bl, A.tx + 2, A.ty); else spawnEnemy(bt, bl, A.tx, A.ty - 2);
 }
-function loadMap(id) { const c = MAPS[id]; if (c.type === 'city') { genCity(c); renderGround(); enemies.length = 0; } else { genWorld(c); renderGround(); placeSpawns(); } }
+function loadMap(id) { const c = MAPS[id]; if (c.type === 'city') { genCity(c); renderGround(); enemies.length = 0; } else { genWorld(c); renderGround(); placeSpawns(); } if (typeof NET !== 'undefined' && P) NET.onMapChange(); }
 
 // ============ game state ============
 let state = 'menu', P = null, minion = null, npcs = [];
@@ -1132,13 +1132,15 @@ function playerDmg(mult) {
 }
 function hitEnemy(e, amt, src, crit, col) {
   if (!alive(e)) return;
+  if (NET.shared()) { NET.hit(e, amt, crit, col ? { col } : null); e.flash = .12; floatTxt(e.x, e.y - 34 * e.scale, (crit ? amt + '!' : '' + amt), crit ? '#ffd54a' : (col || '#fff'), crit ? 17 : 13); if (src === P) P.combatT = 0; return; }
   e.hp -= amt; e.flash = .12;
   floatTxt(e.x, e.y - 34 * e.scale, (crit ? amt + '!' : '' + amt), crit ? '#ffd54a' : (col || '#fff'), crit ? 17 : 13);
   if (src && (!e.aggro || e.state !== 'chase')) { e.aggro = src; e.state = 'chase'; }
   if (src === P) P.combatT = 0;
   if (e.hp <= 0) killEnemy(e);
 }
-function killEnemy(e) {
+function killEnemy(e, fromNet) {
+  if (!fromNet && NET.role === 'host') NET.broadcast({ t: 'kill', mk: NET.mk(), id: e.id });
   e.dead = true; e.hp = 0; const D = ETYPES[e.type];
   e.respawn = D.boss ? 90 : rnd(16, 24);
   burst(e.x, e.y - 14, D.blood || '#e2dccb', D.boss ? 40 : 14, 80, .8, 3, 120);
@@ -1208,11 +1210,11 @@ function castSkill(i, t) {
     case 'melee': { const { d, crit } = playerDmg(sk.p); hitEnemy(t, d, P, crit); burst(t.x, t.y - 16, '#fff2c0', 6, 50, .3, 2); break; }
     case 'proj': { const { d, crit } = playerDmg(sk.p); projs.push({ x: sx, y: sy, t, spd: sk.big ? 300 : 360, dmg: d, crit, col: sk.color, big: sk.big, slow: sk.slow, owner: P }); break; }
     case 'multi': { const ts = enemies.filter(e => alive(e) && dist(e, P) < (sk.range + 20)).sort((a, b) => dist(a, P) - dist(b, P)).slice(0, sk.n3 || 3); if (!ts.includes(t)) ts[0] = t; for (const e of ts) { const { d, crit } = playerDmg(sk.p); projs.push({ x: sx, y: sy, t: e, spd: 380, dmg: d, crit, col: sk.color, owner: P }); } break; }
-    case 'dot': { const { d } = playerDmg(sk.p); t.dot = { dps: d / sk.dur, t: sk.dur, acc: 0, src: P }; burst(t.x, t.y - 18, '#6dff8a', 16, 40, .8, 2.5, -30); hitEnemy(t, 1, P, false, '#6dff8a'); break; }
+    case 'dot': { const { d } = playerDmg(sk.p); if (NET.shared()) { NET.hit(t, Math.round(d), false, { dot: sk.dur }); t.dot = { t: sk.dur }; burst(t.x, t.y - 18, '#6dff8a', 16, 40, .8, 2.5, -30); break; } t.dot = { dps: d / sk.dur, t: sk.dur, acc: 0, src: P }; burst(t.x, t.y - 18, '#6dff8a', 16, 40, .8, 2.5, -30); hitEnemy(t, 1, P, false, '#6dff8a'); break; }
     case 'drain': { const { d, crit } = playerDmg(sk.p); projs.push({ x: sx, y: sy, t, spd: 320, dmg: d, crit, col: sk.color, drain: 1, owner: P }); break; }
     case 'aoe': {
       ring(P.x, P.y - 8, sk.radius, sk.color, .5); burst(P.x, P.y - 10, 'rgb(' + sk.color + ')', 26, sk.radius * 1.6, .5, 3);
-      for (const e of enemies) if (alive(e) && Math.hypot(e.x - P.x, e.y - P.y) < sk.radius + 8) { const { d, crit } = playerDmg(sk.p); hitEnemy(e, d, P, crit); if (sk.slow) e.slow = sk.slow; }
+      for (const e of enemies) if (alive(e) && Math.hypot(e.x - P.x, e.y - P.y) < sk.radius + 8) { const { d, crit } = playerDmg(sk.p); hitEnemy(e, d, P, crit); if (sk.slow) applyCC(e, { slow: sk.slow }); }
       break;
     }
     case 'heal': { const h = Math.round(P.maxHp * sk.p); P.hp = Math.min(P.maxHp, P.hp + h); floatTxt(P.x, P.y - 40, '+' + h, '#7dff9a', 15); burst(P.x, P.y - 16, '#ffe98a', 24, 50, .9, 2.5, -60); break; }
@@ -1252,7 +1254,8 @@ function moveInput() {
   return { x: x / l * m, y: y / l * m, m };
 }
 addEventListener('keydown', e => {
-  if (e.target && e.target.tagName === 'INPUT') { if (e.key === 'Enter' && state === 'menu' && !$('scrName').hidden) $('bStart').click(); return; }
+  if (e.target && e.target.tagName === 'INPUT') { if (e.key === 'Enter' && state === 'menu' && !$('scrName').hidden) $('bStart').click(); if (e.key === 'Enter' && e.target.id === 'netCode') NET.join(e.target.value); return; }
+  if (e.code === 'Enter' && state === 'game' && $('dialog').hidden) { e.preventDefault(); openChat(); return; }
   keys[e.code] = true;
   if (state !== 'game') return;
   if (e.code >= 'Digit1' && e.code <= 'Digit4') { useSkill(+e.code.slice(5) - 1); pressFx(+e.code.slice(5) - 1); }
@@ -1346,7 +1349,7 @@ function updatePlayer(dt) {
     else {
       const m = moveTowards(p, t.x, t.y, 520, dt, 22); moved = m;
       burst(p.x, p.y - 10, '#b09080', 1, 20, .3, 2);
-      if (dist(p, t) <= 24 || m < 1) { hitEnemy(t, p.dash.dmg.d, p, p.dash.dmg.crit); if (alive(t)) { t.stun = p.dash.stun; floatTxt(t.x, t.y - 50, 'Оглушено', '#ffd54a', 11); } ring(t.x, t.y - 8, 30, '217,200,176', .3); p.dash = null; }
+      if (dist(p, t) <= 24 || m < 1) { hitEnemy(t, p.dash.dmg.d, p, p.dash.dmg.crit); if (alive(t)) { applyCC(t, { stun: p.dash.stun }); floatTxt(t.x, t.y - 50, 'Оглушено', '#ffd54a', 11); } ring(t.x, t.y - 8, 30, '217,200,176', .3); p.dash = null; }
     }
   } else {
     const mv = moveInput();
@@ -1394,6 +1397,7 @@ function updatePlayer(dt) {
   if (p.moving) p.walk += dt * 11; else p.walk += dt * 2;
 }
 function updateEnemies(dt) {
+  if (NET.shared()) { guestEnemies(dt); return; }
   for (const e of enemies) {
     if (e.dead) { if (e.noRespawn) continue; e.respawn -= dt; if (e.respawn <= 0) { e.dead = false; e.hp = e.maxHp; e.x = e.hx; e.y = e.hy; e.state = 'idle'; e.aggro = null; e.dot = null; burst(e.x, e.y - 12, '#8a6aff', 10, 40, .6, 2); } continue; }
     e.flash = Math.max(0, e.flash - dt); e.slow = Math.max(0, e.slow - dt);
@@ -1403,20 +1407,21 @@ function updateEnemies(dt) {
     const spd = e.speed * (e.slow > 0 ? .45 : 1);
     const D = ETYPES[e.type];
     let moved = 0;
-    const tgtAlive = t => t && (t === P ? !P.dead : t.hp > 0 && (minion === t || (t.kind === 'ally' && !t.dead)));
+    const tgtAlive = t => t && (t === P ? !P.dead : t.kind === 'remote' ? !t.dead && t.mk === NET.mk() && NET.peers.has(t.id) : t.hp > 0 && (minion === t || (t.kind === 'ally' && !t.dead)));
     if (e.state === 'idle') {
       e.wT -= dt;
       if (e.wT <= 0) { e.wT = rnd(2, 5); const a = Math.random() * 6.28, r = rnd(0, 50); e.wx = e.hx + Math.cos(a) * r; e.wy = e.hy + Math.sin(a) * r; }
       if (e.wx && Math.hypot(e.wx - e.x, e.wy - e.y) > 4) moved = moveTowards(e, e.wx, e.wy, spd * .4, dt);
       if (P && !P.dead && !inCamp(P) && dist(e, P) < D.aggro) { e.state = 'chase'; e.aggro = P; }
+      if (NET.role === 'host' && e.state === 'idle') for (const rp of NET.remotesHere()) if (!rp.dead && !inCamp(rp) && dist(e, rp) < D.aggro) { e.state = 'chase'; e.aggro = rp; break; }
       if (allies.length) { const tk = allies.find(a => a.role === 'tank' && !a.dead); for (const a of allies) if (!a.dead && dist(e, a) < D.aggro * .8) { e.state = 'chase'; e.aggro = tk && dist(e, tk) < D.aggro + 60 ? tk : a; break; } }
     } else if (e.state === 'chase') {
       const t = e.aggro;
       const leash = Math.hypot(e.x - e.hx, e.y - e.hy) > (D.boss ? 260 : 420);
-      if (!tgtAlive(t) || leash || (t === P && inCamp(P)) || inCamp(e)) { e.state = 'return'; e.aggro = null; }
+      if (!tgtAlive(t) || leash || ((t === P || t.kind === 'remote') && inCamp(t)) || inCamp(e)) { e.state = 'return'; e.aggro = null; }
       else {
         const d = dist(e, t);
-        if (D.boss) { e.slamT -= dt; if (e.slamT <= 0 && d < 160) { e.slamT = rnd(6, 8); teles.push({ x: t.x, y: t.y, r: 72, t: 0, max: 1.2, dmg: e.dmg * 1.8 }); toast(e.name + ' готує удар! Відійди!'); } }
+        if (D.boss) { e.slamT -= dt; if (e.slamT <= 0 && d < 160) { e.slamT = rnd(6, 8); teles.push({ x: t.x, y: t.y, r: 72, t: 0, max: 1.2, dmg: e.dmg * 1.8 }); if (NET.role === 'host') NET.broadcast({ t: 'tele', mk: NET.mk(), x: t.x, y: t.y, r: 72, max: 1.2 }); toast(e.name + ' готує удар! Відійди!'); } }
         if (d > e.range) { moved = moveTowards(e, t.x, t.y, spd, dt, e.range - 4); if (moved < spd * dt * .2) { e.stuckT = (e.stuckT || 0) + dt; if (e.stuckT > 2) { e.state = 'return'; e.aggro = null; e.stuckT = 0; } } else e.stuckT = 0; }
         else {
           setFacing(e, t.x - e.x, 0);
@@ -1424,7 +1429,7 @@ function updateEnemies(dt) {
           if (e.atkT <= 0) {
             e.atkT = e.cd; e.atkAnim = 0;
             if (D.ranged) projs.push({ x: e.x, y: e.y - 20, t, spd: 190, dmg: e.dmg, col: D.pcol || '140,240,220', owner: e });
-            else if (t === P) hitPlayer(e.dmg, e); else { const dm = Math.round(e.dmg * (t.role === 'tank' ? .55 : 1)); t.hp -= dm; t.flash = .12; t.combatT = 0; floatTxt(t.x, t.y - 30, '-' + dm, '#ff9a8a', 12); }
+            else if (t === P) hitPlayer(e.dmg, e); else if (t.kind === 'remote') NET.hurt(t, e.dmg); else { const dm = Math.round(e.dmg * (t.role === 'tank' ? .55 : 1)); t.hp -= dm; t.flash = .12; t.combatT = 0; floatTxt(t.x, t.y - 30, '-' + dm, '#ff9a8a', 12); }
           }
         }
       }
@@ -1462,11 +1467,11 @@ function updateProjs(dt) {
       projs.splice(i, 1);
       if (pr.owner === P || pr.owner.kind === 'ally') {
         hitEnemy(t, pr.dmg, pr.owner, pr.crit, pr.drain ? '#ff8aa0' : null); burst(t.x, ty, 'rgb(' + pr.col + ')', pr.big ? 18 : 8, pr.big ? 90 : 50, .4, pr.big ? 3.5 : 2.5);
-        if (pr.slow && alive(t)) t.slow = pr.slow;
+        if (pr.slow && alive(t)) applyCC(t, { slow: pr.slow });
         if (pr.drain && pr.owner === P) { const h = Math.round(pr.dmg * .6); P.hp = Math.min(P.maxHp, P.hp + h); floatTxt(P.x, P.y - 40, '+' + h, '#7dff9a', 13); }
       } else {
         burst(t.x, ty, 'rgb(' + pr.col + ')', 8, 40, .4, 2.5);
-        if (t === P) hitPlayer(pr.dmg, pr.owner); else { t.hp -= Math.round(pr.dmg); t.flash = .12; }
+        if (t === P) hitPlayer(pr.dmg, pr.owner); else if (t.kind === 'remote') NET.hurt(t, pr.dmg); else { t.hp -= Math.round(pr.dmg); t.flash = .12; }
       }
       continue;
     }
@@ -1479,7 +1484,7 @@ function updateFx(dt) {
   for (let i = rings.length - 1; i >= 0; i--) { rings[i].life -= dt; if (rings[i].life <= 0) rings.splice(i, 1); }
   for (let i = teles.length - 1; i >= 0; i--) {
     const t = teles[i]; t.t += dt;
-    if (t.t >= t.max) { teles.splice(i, 1); ring(t.x, t.y, t.r, '200,120,255', .4); burst(t.x, t.y, '#c9a0ff', 30, 120, .6, 3); if (P && !P.dead && Math.hypot(P.x - t.x, P.y - t.y) < t.r) hitPlayer(t.dmg); for (const a of allies) if (!a.dead && Math.hypot(a.x - t.x, a.y - t.y) < t.r) { a.hp -= Math.round(t.dmg * .6); a.flash = .12; } }
+    if (t.t >= t.max) { teles.splice(i, 1); ring(t.x, t.y, t.r, '200,120,255', .4); burst(t.x, t.y, '#c9a0ff', 30, 120, .6, 3); if (t.vis) continue; if (P && !P.dead && Math.hypot(P.x - t.x, P.y - t.y) < t.r) hitPlayer(t.dmg); if (NET.role === 'host') for (const rp of NET.remotesHere()) if (!rp.dead && Math.hypot(rp.x - t.x, rp.y - t.y) < t.r) NET.hurt(rp, t.dmg); for (const a of allies) if (!a.dead && Math.hypot(a.x - t.x, a.y - t.y) < t.r) { a.hp -= Math.round(t.dmg * .6); a.flash = .12; } }
   }
   if (toastT > 0) { toastT -= dt; if (toastT <= 0) $('toast').style.opacity = 0; }
   markT = Math.max(0, markT - dt);
@@ -1525,7 +1530,7 @@ function render() {
   const m = 80;
   for (const o of objs) if (o.x > camX - m && o.x < camX + vw + m && o.y > camY - 20 && o.y < camY + vh + 90) list.push(o);
   for (const e of enemies) if (!e.dead && e.x > camX - m && e.x < camX + vw + m && e.y > camY - 20 && e.y < camY + vh + 90) list.push(e);
-  if (state !== 'menu') { for (const n of npcs) list.push(n); if (minion) list.push(minion); for (const a of allies) if (!a.dead) list.push(a); if (P && !P.dead) list.push(P); }
+  if (state !== 'menu') { for (const n of npcs) list.push(n); if (minion) list.push(minion); for (const a of allies) if (!a.dead) list.push(a); if (NET.role) for (const rp of NET.remotesHere()) if (!rp.dead) list.push(rp); if (P && !P.dead) list.push(P); }
   list.sort((a, b) => a.y - b.y);
   for (const it of list) drawThing(it);
   // projectiles
@@ -1552,6 +1557,9 @@ function render() {
     for (const n of npcs) { ctx.fillStyle = '#000'; ctx.fillText(n.name, n.x + .7, n.y - 44.3); ctx.fillStyle = '#ffd97a'; ctx.fillText(n.name, n.x, n.y - 45); ctx.font = 'bold 13px sans-serif'; ctx.fillText(n.role === 'elder' ? '❗' : (SHOP_ICON[n.kinds[0]] || '🪙'), n.x, n.y - 56 + Math.sin(time * 3) * 2); ctx.font = 'bold 9px Philosopher, serif'; }
     for (const o of dentrs) { const t1 = '⚔ ' + (DUNGEONS[M.id] ? DUNGEONS[M.id].name : 'Підземелля'), t2 = 'підземелля · рів. ' + (DUNGEONS[M.id] ? DUNGEONS[M.id].lvl : '') + '+'; ctx.fillStyle = '#000'; ctx.fillText(t1, o.x + .7, o.y - 80.3); ctx.fillStyle = '#c9a0ff'; ctx.fillText(t1, o.x, o.y - 81); ctx.fillStyle = '#000'; ctx.fillText(t2, o.x + .7, o.y - 70.3); ctx.fillStyle = '#ffe7b0'; ctx.fillText(t2, o.x, o.y - 71); }
     for (const a of allies) { if (a.dead) continue; ctx.fillStyle = '#000'; ctx.fillText(a.name, a.x + .7, a.y - 46.3); ctx.fillStyle = '#9fe0ff'; ctx.fillText(a.name, a.x, a.y - 47); ctx.fillStyle = '#000'; ctx.fillRect(a.x - 13, a.y - 44, 26, 4); ctx.fillStyle = '#3ac060'; ctx.fillRect(a.x - 12, a.y - 43, 24 * a.hp / a.maxHp, 2); }
+    if (NET.role) for (const rp of NET.remotesHere()) { if (rp.dead) continue; ctx.fillStyle = '#000'; ctx.fillText(rp.n + ' · ' + rp.l, rp.x + .7, rp.y - 58.3); ctx.fillStyle = rp.f === 'light' ? '#9fc3ff' : '#9fe7a8'; ctx.fillText(rp.n + ' · ' + rp.l, rp.x, rp.y - 59); ctx.fillStyle = '#000'; ctx.fillRect(rp.x - 14, rp.y - 56, 28, 4); ctx.fillStyle = '#3ac060'; ctx.fillRect(rp.x - 13, rp.y - 55, 26 * clamp(rp.hp / rp.maxHp, 0, 1), 2); }
+    const bubble = (who) => { if (!(who.chatT > 0) || !who.chat) return; ctx.font = '9px Philosopher, serif'; const tw = Math.min(150, ctx.measureText(who.chat).width + 10), bx = who.x - tw / 2, by = who.y - 84; ctx.globalAlpha = Math.min(1, who.chatT); ctx.fillStyle = 'rgba(20,14,30,.88)'; rr(ctx, bx, by, tw, 15, 5); ctx.fill(); ctx.strokeStyle = 'rgba(232,193,112,.6)'; ctx.lineWidth = 1; ctx.stroke(); ctx.fillStyle = '#efe6d6'; ctx.fillText(who.chat.length > 28 ? who.chat.slice(0, 27) + '…' : who.chat, who.x, by + 11); ctx.globalAlpha = 1; ctx.font = 'bold 9px Philosopher, serif'; };
+    if (P) { if (P.chatT > 0) P.chatT -= 1 / 60; bubble(P); } if (NET.role) for (const rp of NET.remotesHere()) bubble(rp);
     if (P && !P.dead) { ctx.fillStyle = '#000'; ctx.fillText(P.name, P.x + .7, P.y - 44.3); ctx.fillStyle = P.faction === 'light' ? '#9fc3ff' : '#9fe7a8'; ctx.fillText(P.name, P.x, P.y - 45); }
     // quest arrow
     if (P && !P.dead && M.type !== 'city') {
@@ -1611,6 +1619,7 @@ function drawThing(it) {
     if (it.slow > 0) { c.fillStyle = 'rgba(160,230,255,.3)'; ell(c, it.x, it.y - 2, 12, 4); }
     return;
   }
+  if (it.kind === 'remote') { if (heroReady(it.c)) drawHero(c, it.x, it.y, it.c, { face: it.face, back: it.back, side: it.vside, walk: it.walk, moving: it.moving, atk: it.atkAnim, glow: it.f === 'light' ? 'rgba(150,190,255,.18)' : 'rgba(150,255,170,.16)' }); else if (CLASSES[it.c]) drawHumanoid(c, it.x, it.y, { look: CLASSES[it.c].look, face: it.face, back: it.back, walk: it.walk, moving: it.moving, atk: it.atkAnim }); return; }
   if (it.kind === 'ally') { drawHumanoid(c, it.x, it.y, { look: it.look, face: it.face, back: it.back, walk: it.walk, moving: it.moving, atk: it.atkAnim, alpha: it.flash > 0 ? .6 : 1 }); return; }
   if (it.kind === 'npc') { drawHumanoid(c, it.x, it.y, { look: it.look, face: it.face, walk: time * 2, moving: false }); return; }
   if (it.kind === 'minion' && it.wolf) { drawWolf(c, it.x, it.y, { D: WOLF_PET, face: it.face, walk: it.walk, moving: it.moving, atk: it.atkAnim, alpha: Math.min(1, it.life) * (it.flash > 0 ? .6 : 1), scale: .95 }); return; }
@@ -1683,6 +1692,7 @@ function drawMinimap() {
   for (const e of enemies) { if (e.dead) continue; const x = (e.x / T - cx) * sc, y = (e.y / T - cy) * sc; if (x < 0 || y < 0 || x > mm.width || y > mm.height) continue; const b = ETYPES[e.type].boss; mmc.fillRect(x - 1, y - 1, b ? 4 : 2, b ? 4 : 2); }
   mmc.fillStyle = '#c9a0ff'; for (const o of portals) mmc.fillRect((o.tx - cx) * sc - 2, (o.ty - cy) * sc - 2, 4, 4);
   mmc.fillStyle = '#e8c170'; mmc.fillRect((CAMP.tx - cx) * sc - 2, (CAMP.ty - cy) * sc - 2, 4, 4);
+  if (NET.role) { mmc.fillStyle = '#6ab0ff'; for (const rp of NET.remotesHere()) { mmc.beginPath(); mmc.arc((rp.x / T - cx) * sc, (rp.y / T - cy) * sc, 2.3, 0, 6.29); mmc.fill(); } }
   mmc.fillStyle = '#fff'; mmc.beginPath(); mmc.arc((P.x / T - cx) * sc, (P.y / T - cy) * sc, 2.5, 0, 6.29); mmc.fill();
 }
 
@@ -1716,9 +1726,10 @@ function updateHud() {
   if (alive(t)) { $('tFrame').hidden = false; setTxt('tName', t.name); setTxt('tLvl', ' ' + t.lvl); setW('tHp', t.hp / t.maxHp); setTxt('tHpT', Math.ceil(t.hp) + ' / ' + t.maxHp); }
   else $('tFrame').hidden = true;
   setTxt('qL', '📍 ' + M.name);
-  const pt = $('party');
-  if (allies.length) { if (pt.childElementCount !== allies.length) { pt.innerHTML = allies.map((a, i) => `<div class="pm"><span>${a.name}</span><div class="bar hp"><i id="pa${i}"></i></div></div>`).join(''); pt.hidden = false; for (const k in hudCache) if (k.startsWith('pa')) delete hudCache[k]; } allies.forEach((a, i) => setW('pa' + i, a.dead ? 0 : a.hp / a.maxHp)); }
-  else if (!pt.hidden) { pt.hidden = true; pt.innerHTML = ''; }
+  const pt = $('party'), mem = allies.map(a => ({ n: a.name, f: a.dead ? 0 : a.hp / a.maxHp })).concat(NET.role ? [...NET.peers.values()].map(p => ({ n: '👤 ' + p.n + (p.mk !== NET.mk() ? ' · ' + (p.mn || '') : ''), f: p.dead ? 0 : (p.hp || 0) / (p.maxHp || 1) })) : []);
+  const sig = mem.map(m => m.n).join('|');
+  if (mem.length) { if (hudCache.partySig !== sig) { hudCache.partySig = sig; pt.innerHTML = mem.map((m, i) => `<div class="pm"><span>${m.n}</span><div class="bar hp"><i id="pa${i}"></i></div></div>`).join(''); pt.hidden = false; for (const k in hudCache) if (/^pa\d/.test(k)) delete hudCache[k]; } mem.forEach((m, i) => setW('pa' + i, m.f)); }
+  else if (!pt.hidden) { pt.hidden = true; pt.innerHTML = ''; hudCache.partySig = ''; }
   const q = questFor(P.questIdx); setTxt('qT', q.t); setTxt('qD', q.d); setTxt('qP', q.type === 'none' || !q.n ? '' : P.qprog + ' / ' + q.n);
   const btns = $('skills').children;
   P.C.skills.forEach((sk, i) => {
@@ -1750,6 +1761,10 @@ $('dialog').addEventListener('click', e => {
   else if (act === 'idrop' && invSel) { P.bag.splice(invSel.k, 1); writeSave(); openInventory(); }
   else if (act === 'dsel') { if (a.dataset.k === 'diff') dsel.diff = a.dataset.v; else dsel.party = a.dataset.v === '1'; openDungeonDialog(); }
   else if (act === 'denter') enterDungeon();
+  else if (act === 'nhost') NET.host();
+  else if (act === 'njoinc') NET.join(($('netCode') || {}).value);
+  else if (act === 'nleave') { NET.leave(); openNet(); }
+  else if (act === 'njoin') { const d = NET.invite; closeDialog(); if (d && DUNGEONS[d.parent]) { allies.length = 0; enterDungeon(d); } }
 });
 function openNpc(n) {
   if (n.role === 'shop') return openShop(n, 'buy');
@@ -1764,6 +1779,11 @@ function openMenu() {
     <button class="btn" data-act="resume">Продовжити</button><button class="btn ghost" data-act="inv">🎒 Інвентар</button><button class="btn ghost" data-act="story">📜 Історія</button><button class="btn ghost" data-act="save">Зберегти</button><button class="btn ghost" data-act="tomenu">Головне меню</button>`);
 }
 $('bMenu').addEventListener('click', () => { if (state === 'game') openMenu(); });
+$('bNet').addEventListener('click', () => { if (state === 'game') openNet(); });
+$('bChat').addEventListener('click', () => openChat());
+function openChat() { if (state !== 'game') return; const w = $('chatbox'); w.hidden = false; const i = $('chatIn'); i.value = ''; setTimeout(() => i.focus(), 30); }
+$('chatIn').addEventListener('keydown', e => { if (e.key === 'Enter') { NET.chat(e.target.value); e.target.value = ''; $('chatbox').hidden = true; e.target.blur(); } if (e.key === 'Escape') { $('chatbox').hidden = true; e.target.blur(); } e.stopPropagation(); });
+$('chatSend').addEventListener('click', () => { NET.chat($('chatIn').value); $('chatIn').value = ''; $('chatbox').hidden = true; });
 $('bInv').addEventListener('click', () => { if (state === 'game' && !P.dead) { if (!$('dialog').hidden && $('dialog').querySelector('.bag')) closeDialog(); else openInventory(); } });
 $('bRevive').addEventListener('click', reviveP);
 
@@ -1824,14 +1844,15 @@ function startGame(d) {
   toast(M.name + ' · поговори зі старійшиною ❗');
   if (fresh) openStory(true);
 }
-function toMenu() { allies.length = 0; if (M.type === 'dungeon') loadMap(M.parent); state = 'menu'; $('hud').hidden = true; $('death').hidden = true; refreshTitle(); show('scrTitle'); P = null; minion = null; }
+function toMenu() { if (NET.role) NET.leave(true); allies.length = 0; if (M.type === 'dungeon') loadMap(M.parent); state = 'menu'; $('hud').hidden = true; $('death').hidden = true; refreshTitle(); show('scrTitle'); P = null; minion = null; }
 
 // ============ loop ============
 let last = performance.now(), saveT = 0;
 function frame(now) {
   const dt = Math.min(.05, (now - last) / 1000); last = now; time += dt;
   if (state === 'game' && P) {
-    const paused = !$('dialog').hidden;
+    const paused = !$('dialog').hidden && !NET.role;
+    NET.tick(dt);
     if (!paused) { updatePlayer(dt); updateMinion(dt); updateAllies(dt); updateEnemies(dt); updateProjs(dt); }
     updateFx(dt);
     updateHud(); drawMinimap();
@@ -2111,22 +2132,25 @@ function openDungeonDialog() {
     <div class="lbl">Складність</div><div class="opts">${dl}</div>
     <div class="lbl">Загін</div><div class="opts two"><button class="opt ${!dsel.party ? 'on' : ''}" data-act="dsel" data-k="party" data-v="0"><b>Сам</b><small>Тільки ти</small></button>
       <button class="opt ${dsel.party ? 'on' : ''}" data-act="dsel" data-k="party" data-v="1"><b>З загоном</b><small>${ALLY.tank.n[f]}, ${ALLY.healer.n[f]}, ${ALLY.archer.n[f]}</small></button></div>
-    <p class="hintx">Похід із живими гравцями з'явиться в онлайн-версії гри. Поки що загін — союзники під керуванням гри.</p>
+    <p class="hintx">${NET.role === 'host' && NET.peers.size ? 'Твоя група отримає запрошення піти з тобою.' : NET.role === 'guest' ? 'Ти не лідер групи: зайдеш сам. Щоб піти разом, підземелля має відкрити лідер.' : 'Щоб піти з братом, створіть групу (кнопка 👥). Союзники загону — під керуванням гри.'}</p>
     <button class="btn" data-act="denter">Увійти</button><button class="btn ghost" data-act="close">Не зараз</button>`, 'wide');
 }
-function enterDungeon() {
-  const info = DUNGEONS[M.id], D = DIFFS[dsel.diff], parent = M.id, en = dentrs[0];
+function enterDungeon(opt) {
+  if (opt && opt.parent && M.id !== opt.parent) { loadMap(opt.parent); syncQuest(); }
+  const diffKey = opt ? opt.diff : dsel.diff, seed = opt ? opt.seed : (Math.random() * 1e9) | 0;
+  const info = DUNGEONS[M.id], D = DIFFS[diffKey], parent = M.id, en = dentrs[0];
   P.qs[parent] = { i: P.questIdx, p: P.qprog };
-  const cfg = { id: 'dungeon', type: 'dungeon', name: info.name, lv: D.n.toLowerCase() + ' складність', parent, entr: en ? { x: en.x, y: en.y + 40 } : null, seed: (Math.random() * 1e9) | 0, pal: DPAL, dark: .6, tint: '6,3,14',
-    liquid: 'water', shore: '#222', portalCol: '200,170,255', zones: [], hunt: [], diff: D, diffKey: dsel.diff, lvl: info.lvl, types: info.types, boss: info.boss,
+  const cfg = { id: 'dungeon', type: 'dungeon', name: info.name, lv: D.n.toLowerCase() + ' складність', parent, entr: en ? { x: en.x, y: en.y + 40 } : null, seed, pal: DPAL, dark: .6, tint: '6,3,14',
+    liquid: 'water', shore: '#222', portalCol: '200,170,255', zones: [], hunt: [], diff: D, diffKey, lvl: info.lvl, types: info.types, boss: info.boss,
     quests: [{ t: info.name, d: 'Пройди кімнати й здолай боса (' + D.n.toLowerCase() + ')', type: info.boss, n: 1, xp: 0, gold: 0, z: 'arena' }] };
   genDungeon(cfg); renderGround(); spawnDungeon(cfg);
   P.qs.dungeon = { i: 0, p: 0 }; syncQuest(); npcs = [];
   P.x = tc(CAMP.tx); P.y = tc(CAMP.ty) + 10; P.portalLock = true; P.path = null; P.target = null; P.autoAtk = false; P.pending = -1; P.talkTo = null; P.dash = null;
   projs.length = 0; teles.length = 0; parts.length = 0; floats.length = 0; allies.length = 0;
-  if (dsel.party) makeAllies();
+  if (!opt && dsel.party) makeAllies();
   if (minion) { minion.x = P.x; minion.y = P.y; minion.target = null; }
   closeDialog(); toast(info.name + ' · ' + D.n + ' складність'); writeSave();
+  NET.onMapChange(); if (!opt && NET.role === 'host') NET.broadcast({ t: 'dng', parent, seed, diff: diffKey });
 }
 function exitDungeon() {
   const parent = M.parent, entr = M.entr;
@@ -2295,8 +2319,210 @@ function drawDEntr(o) {
   c.fillStyle = '#c9a0ff'; c.fillRect(x - 3, y - 64, 6, 6);
 }
 
+// ============ online group (PeerJS, leader = host) ============
+const NET = {
+  role: null, peer: null, conns: new Map(), hostConn: null, hostId: null, code: '', peers: new Map(), myId: '',
+  stT: 0, enT: 0, needT: 0, syncedMk: null, status: '', log: [], invite: null,
+  mk() { return M.type === 'dungeon' ? 'dng:' + M.seed : M.id; },
+  hostPeer() { return this.hostId ? this.peers.get(this.hostId) : null; },
+  shared() { if (this.role !== 'guest') return false; const h = this.hostPeer(); return !!h && h.mk === this.mk(); },
+  synced() { return this.shared() && this.syncedMk === this.mk(); },
+  remotesHere() { const mk = this.mk(), out = []; for (const p of this.peers.values()) if (p.mk === mk && p.seen && performance.now() - p.seen < 4000) out.push(p); return out; },
+  opts() {
+    const q = new URLSearchParams(location.search).get('peer');
+    if (q) { const [h, pt] = q.split(':'); return { host: h, port: +(pt || 9000), path: '/', secure: false, debug: 0 }; }
+    return { debug: 0 };
+  },
+  load() {
+    return new Promise((res, rej) => {
+      if (window.Peer) return res();
+      const urls = ['https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js', 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js'];
+      const tryN = i => { if (i >= urls.length) return rej(new Error('lib')); const s = document.createElement('script'); s.src = urls[i]; s.onload = () => res(); s.onerror = () => tryN(i + 1); document.head.appendChild(s); };
+      tryN(0);
+    });
+  },
+  async host() {
+    this.status = 'Підключення…'; refreshNetDialog();
+    try { await this.load(); } catch (e) { this.status = 'Не вдалося завантажити мережевий модуль'; refreshNetDialog(); return; }
+    const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; this.code = Array.from({ length: 4 }, () => A[Math.floor(Math.random() * A.length)]).join('');
+    const peer = new Peer('tcl-grp-' + this.code, this.opts()); this.peer = peer;
+    peer.on('open', id => { this.myId = id; this.role = 'host'; this.status = ''; refreshNetDialog(); toast('Група створена. Код: ' + this.code); });
+    peer.on('connection', c => this.setup(c));
+    peer.on('error', e => { if (e.type === 'unavailable-id') { peer.destroy(); this.host(); return; } this.status = 'Помилка мережі: ' + e.type; refreshNetDialog(); });
+    peer.on('disconnected', () => { try { peer.reconnect(); } catch (e) { } });
+  },
+  async join(code) {
+    code = (code || '').trim().toUpperCase(); if (code.length < 4) { this.status = 'Введи код із 4 символів'; refreshNetDialog(); return; }
+    this.status = 'Підключення…'; refreshNetDialog();
+    try { await this.load(); } catch (e) { this.status = 'Не вдалося завантажити мережевий модуль'; refreshNetDialog(); return; }
+    const peer = new Peer(undefined, this.opts()); this.peer = peer; this.code = code;
+    peer.on('open', id => {
+      this.myId = id; const c = peer.connect('tcl-grp-' + code, { reliable: true }); this.hostConn = c; this.hostId = c.peer; this.setup(c);
+      setTimeout(() => { if (this.role !== 'guest') { this.status = 'Групу з кодом ' + code + ' не знайдено'; refreshNetDialog(); } }, 9000);
+    });
+    peer.on('error', e => { this.status = e.type === 'peer-unavailable' ? 'Групу з кодом ' + code + ' не знайдено' : 'Помилка мережі: ' + e.type; refreshNetDialog(); });
+  },
+  setup(c) {
+    c.on('open', () => {
+      this.conns.set(c.peer, c);
+      if (c === this.hostConn) { this.role = 'guest'; this.status = ''; refreshNetDialog(); toast('Ти в групі!'); }
+      c.send({ t: 'hello', n: P ? P.name : '?' });
+      this.sendState(true);
+    });
+    c.on('data', d => this.recv(c.peer, d));
+    c.on('close', () => this.drop(c.peer));
+    c.on('error', () => this.drop(c.peer));
+  },
+  drop(id) {
+    const p = this.peers.get(id); this.conns.delete(id); this.peers.delete(id);
+    if (p) { toast(p.n + ' покинув групу'); for (const e of enemies) if (e.aggro === p) { e.aggro = null; e.state = 'return'; } }
+    if (this.role === 'host') this.broadcast({ t: 'gone', id });
+    if (id === this.hostId) { toast('Лідер групи вийшов'); this.leave(true); }
+    refreshNetDialog();
+  },
+  leave(silent) {
+    try { for (const c of this.conns.values()) c.close(); } catch (e) { }
+    try { this.peer && this.peer.destroy(); } catch (e) { }
+    this.role = null; this.peer = null; this.conns.clear(); this.peers.clear(); this.hostConn = null; this.hostId = null; this.code = ''; this.syncedMk = null; this.status = '';
+    if (!silent) toast('Ти вийшов із групи');
+    refreshNetDialog();
+  },
+  send(o) { if (this.role === 'guest') { const c = this.hostConn; if (c && c.open) c.send(o); } else if (this.role === 'host') this.broadcast(o); },
+  broadcast(o, except) { for (const [id, c] of this.conns) if (id !== except && c.open) c.send(o); },
+  sendTo(id, o) { const c = this.conns.get(id); if (c && c.open) c.send(o); },
+  stateMsg() {
+    return { t: 'st', id: this.myId, n: P.name, c: P.clsId, f: P.faction, l: P.lvl, mk: this.mk(), mn: M.name, x: Math.round(P.x), y: Math.round(P.y), fa: P.face, b: P.back ? 1 : 0, vs: P.vside ? 1 : 0, mv: P.moving ? 1 : 0, a: P.atkAnim >= 0 ? 1 : 0, hp: Math.round(P.hp), mh: P.maxHp, d: P.dead ? 1 : 0 };
+  },
+  sendState(force) { if (!this.role || !P) return; this.send(this.stateMsg()); },
+  enemyFull() { return enemies.map(e => ({ id: e.id, type: e.type, lvl: e.lvl, hx: e.hx, hy: e.hy, x: Math.round(e.x), y: Math.round(e.y), hp: Math.round(e.hp), maxHp: e.maxHp, dmg: e.dmg, dead: e.dead ? 1 : 0, nr: e.noRespawn ? 1 : 0, db: e.dBoss ? 1 : 0 })); },
+  tick(dt) {
+    if (!this.role || !P) return;
+    this.stT -= dt; if (this.stT <= 0) { this.stT = .1; this.sendState(); }
+    for (const p of this.peers.values()) { const k = Math.min(1, dt * 12); p.x += (p.tx - p.x) * k; p.y += (p.ty - p.y) * k; p.walk += dt * (p.moving ? 11 : 2); if (p.atkAnim >= 0) { p.atkAnim += dt * 3.5; if (p.atkAnim >= 1) p.atkAnim = -1; } if (p.chatT > 0) p.chatT -= dt; }
+    if (this.role === 'host') {
+      this.enT -= dt;
+      if (this.enT <= 0) {
+        this.enT = .1; const mk = this.mk(), ids = [];
+        for (const [id, p] of this.peers) if (p.mk === mk) ids.push(id);
+        if (ids.length) {
+          const l = enemies.map(e => [e.id, Math.round(e.x), Math.round(e.y), Math.max(0, Math.round(e.hp)), e.dead ? 1 : 0, e.face, e.moving ? 1 : 0, e.atkAnim >= 0 ? 1 : 0, e.stun > 0 ? 1 : 0, e.slow > 0 ? 1 : 0, e.maxHp, e.dot ? 1 : 0]);
+          for (const id of ids) this.sendTo(id, { t: 'en', mk, l });
+        }
+      }
+    } else if (this.shared() && this.syncedMk !== this.mk()) {
+      this.needT -= dt; if (this.needT <= 0) { this.needT = 1; this.send({ t: 'needen', mk: this.mk() }); }
+    }
+  },
+  onMapChange() {
+    this.syncedMk = null; this.needT = 0;
+    if (this.role === 'host') { const mk = this.mk(); for (const [id, p] of this.peers) if (p.mk === mk) this.sendTo(id, { t: 'enfull', mk, list: this.enemyFull() }); }
+    this.sendState();
+  },
+  recv(from, d) {
+    if (!d || !d.t) return;
+    if (this.role === 'host' && ['st', 'chat'].includes(d.t)) this.broadcast(d, from);
+    switch (d.t) {
+      case 'hello': break;
+      case 'st': {
+        const id = d.id || from; let p = this.peers.get(id);
+        if (!p) { p = { kind: 'remote', id, x: d.x, y: d.y, tx: d.x, ty: d.y, walk: 0, atkAnim: -1, chat: '', chatT: 0, cr: 7, scale: 1 }; this.peers.set(id, p); toast((d.n || 'Гравець') + ' у групі'); refreshNetDialog(); }
+        const prevMk = p.mk;
+        Object.assign(p, { n: d.n, c: d.c, f: d.f, l: d.l, mk: d.mk, mn: d.mn, face: d.fa, back: !!d.b, vside: !!d.vs, moving: !!d.mv, hp: d.hp, maxHp: d.mh, dead: !!d.d, seen: performance.now() });
+        if (prevMk !== d.mk || Math.hypot(d.x - p.x, d.y - p.y) > 200) { p.x = d.x; p.y = d.y; }
+        p.tx = d.x; p.ty = d.y;
+        if (d.a && p.atkAnim < 0) p.atkAnim = 0;
+        if (this.role === 'host' && prevMk !== d.mk && d.mk === this.mk()) this.sendTo(id, { t: 'enfull', mk: d.mk, list: this.enemyFull() });
+        break;
+      }
+      case 'gone': { const p = this.peers.get(d.id); if (p) { toast(p.n + ' покинув групу'); this.peers.delete(d.id); refreshNetDialog(); } break; }
+      case 'needen': if (this.role === 'host' && d.mk === this.mk()) this.sendTo(from, { t: 'enfull', mk: d.mk, list: this.enemyFull() }); break;
+      case 'enfull': {
+        if (this.role !== 'guest' || d.mk !== this.mk()) break;
+        enemies.length = 0;
+        for (const s of d.list) { const e = spawnEnemy(s.type, s.lvl, 0, 0); Object.assign(e, { id: s.id, hx: s.hx, hy: s.hy, x: s.x, y: s.y, tx: s.x, ty: s.y, hp: s.hp, maxHp: s.maxHp, dmg: s.dmg, dead: !!s.dead, noRespawn: !!s.nr, dBoss: !!s.db }); }
+        this.syncedMk = d.mk; if (P.target && !enemies.includes(P.target)) { P.target = null; P.autoAtk = false; }
+        break;
+      }
+      case 'en': {
+        if (this.role !== 'guest' || d.mk !== this.mk() || this.syncedMk !== d.mk) break;
+        const byId = new Map(enemies.map(e => [e.id, e])); let miss = false;
+        for (const r of d.l) {
+          const e = byId.get(r[0]); if (!e) { miss = true; continue; }
+          e.tx = r[1]; e.ty = r[2]; if (e.dead && !r[4]) { e.x = r[1]; e.y = r[2]; }
+          if (r[3] < e.hp) e.flash = .12; e.hp = r[3]; e.dead = !!r[4]; e.face = r[5]; e.moving = !!r[6];
+          if (r[7] && e.atkAnim < 0) e.atkAnim = 0; e.stun = r[8] ? .2 : 0; e.slow = r[9] ? .2 : 0; e.maxHp = r[10]; e.dot = r[11] ? e.dot || { t: 1 } : null;
+        }
+        if (miss) this.syncedMk = null;
+        break;
+      }
+      case 'hit': {
+        if (this.role !== 'host' || d.mk !== this.mk()) break;
+        const e = enemies.find(x => x.id === d.id); const p = this.peers.get(from); if (!e || !alive(e)) break;
+        if (d.dot) { e.dot = { dps: d.d / d.dot, t: d.dot, acc: 0, src: p }; if (!e.aggro) { e.aggro = p; e.state = 'chase'; } break; }
+        if (d.slow) e.slow = d.slow; if (d.stun) e.stun = d.stun;
+        if (d.d > 0) hitEnemy(e, d.d, p, !!d.c, d.col);
+        break;
+      }
+      case 'hurt': if (P && !P.dead) hitPlayer(d.d); break;
+      case 'kill': { if (this.role !== 'guest' || d.mk !== this.mk()) break; const e = enemies.find(x => x.id === d.id); if (e && !e.dead) killEnemy(e, true); break; }
+      case 'tele': if (d.mk === this.mk()) teles.push({ x: d.x, y: d.y, r: d.r, t: 0, max: d.max, dmg: 0, vis: 1 }); break;
+      case 'chat': { const p = this.peers.get(d.id); if (p) { p.chat = d.txt; p.chatT = 6; } chatLog((d.n || '?') + ': ' + d.txt); break; }
+      case 'dng': {
+        if (this.role !== 'guest') break;
+        this.invite = d;
+        const info = DUNGEONS[d.parent];
+        openDialog(`<h3>⚔ Похід групи</h3><p>Лідер групи увійшов у підземелля «${info ? info.name : '?'}» (${DIFFS[d.diff].n.toLowerCase()} складність).</p><button class="btn" data-act="njoin">Приєднатися</button><button class="btn ghost" data-act="close">Не зараз</button>`);
+        break;
+      }
+    }
+  },
+  hit(e, d, crit, extra) { this.send(Object.assign({ t: 'hit', mk: this.mk(), id: e.id, d, c: crit ? 1 : 0 }, extra || {})); },
+  hurt(p, d) { this.sendTo(p.id, { t: 'hurt', d: Math.round(d) }); },
+  chat(txt) {
+    txt = (txt || '').trim().slice(0, 120); if (!txt || !P) return;
+    P.chat = txt; P.chatT = 6; chatLog(P.name + ': ' + txt);
+    if (this.role) this.send({ t: 'chat', id: this.myId, n: P.name, txt });
+  }
+};
+let enemySeq = 0;
+function applyCC(e, cc) { if (NET.shared()) { NET.hit(e, 0, false, cc); return; } if (cc.slow) e.slow = cc.slow; if (cc.stun) e.stun = cc.stun; }
+function guestEnemies(dt) {
+  const k = Math.min(1, dt * 12);
+  for (const e of enemies) {
+    e.flash = Math.max(0, e.flash - dt);
+    if (e.atkAnim >= 0) { e.atkAnim += dt * 3; if (e.atkAnim >= 1) e.atkAnim = -1; }
+    if (e.tx != null && !e.dead) { const dx = e.tx - e.x; e.x += dx * k; e.y += (e.ty - e.y) * k; }
+    e.walk += dt * (e.moving ? 9 : 2);
+  }
+}
+function chatLog(line) {
+  const el = $('chatlog'); if (!el) return;
+  const d = document.createElement('div'); d.textContent = line; el.appendChild(d);
+  while (el.childElementCount > 6) el.firstElementChild.remove();
+  setTimeout(() => { d.classList.add('old'); }, 12000);
+}
+function refreshNetDialog() { if (!$('dialog').hidden && $('dialog').querySelector('.netdlg')) openNet(); updateNetBtn(); }
+function updateNetBtn() { const b = $('bNet'); if (b) b.classList.toggle('on', !!NET.role); }
+function openNet() {
+  let body = '';
+  if (!NET.role) {
+    body = `<p>Грайте разом: один гравець створює групу й надсилає код, інші вводять цей код.</p>
+      <button class="btn" data-act="nhost">Створити групу</button>
+      <div class="lbl">Або приєднатися за кодом</div>
+      <div class="joinrow"><input id="netCode" maxlength="4" placeholder="КОД" autocomplete="off" autocapitalize="characters" spellcheck="false"><button class="sbtn" data-act="njoinc">Увійти</button></div>`;
+  } else {
+    const me = `<div class="row"><span>👑 ${NET.role === 'host' ? P.name + ' (ти, лідер)' : P.name + ' (ти)'}</span><small>${M.name}</small></div>`;
+    const others = [...NET.peers.values()].map(p => `<div class="row"><span>${p.id === NET.hostId ? '👑 ' : ''}${p.n} · ${CLASSES[p.c] ? CLASSES[p.c].name : ''} ${p.l} рів.</span><small>${p.mn || ''}</small></div>`).join('');
+    body = `${NET.role === 'host' ? `<p>Код групи:</p><div class="code">${NET.code}</div><p class="gl">Надішли цей код братові — він вводить його в «👥 Група → Приєднатися».</p>` : `<p class="gl">Ти в групі з кодом ${NET.code}.</p>`}
+      <div class="lbl">Учасники</div>${me}${others || '<p class="gl">Поки нікого. Чекаємо…</p>'}
+      <p class="hintx">Монстрів, нагороди за вбивства і підземелля ви ділите між собою, коли ви на одній локації. Підземелля відкриває лідер.</p>
+      <button class="btn ghost" data-act="nleave">Покинути групу</button>`;
+  }
+  openDialog(`<div class="netdlg"><h3>👥 Група</h3>${NET.status ? `<p class="warn">${NET.status}</p>` : ''}${body}<button class="btn ghost" data-act="close">Закрити</button></div>`, 'wide');
+}
+
 // ============ boot ============
 resize(); buildSprites(); buildSprites2(); buildSprites3(); loadMap('cursed'); refreshTitle();
 requestAnimationFrame(frame);
-window.__game = { get P() { return P; }, allies, dentrs, objs, enterDungeon, exitDungeon, openInventory, makeItem, addItem, recalc, get dsel() { return dsel; }, get M() { return M; }, portals, changeMap, enemies, useSkill, worldTap, get state() { return state; } };
+window.__game = { NET, get P() { return P; }, allies, dentrs, objs, enterDungeon, exitDungeon, openInventory, makeItem, addItem, recalc, get dsel() { return dsel; }, get M() { return M; }, portals, changeMap, enemies, useSkill, worldTap, get state() { return state; } };
 })();
