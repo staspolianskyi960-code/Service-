@@ -709,7 +709,7 @@ const CLASSES = {
       { n: 'Висмоктування', i: '🩸', mp: 22, cd: 8, range: 160, t: 'drain', p: 1.7, color: '255,59,92' }]
   },
   warrior: {
-    faction: 'dark', name: 'Воїн', desc: 'Мертвий берсерк із сокирою. Вривається в бій і рубає всіх навколо.',
+    faction: 'dark', name: 'Воїн', desc: 'Найманець, що повстав після смерті й зберіг лють. Вривається в бій і рубає всіх навколо.',
     hp: 165, mp: 55, atk: 16, range: 36, speed: 92, armor: .12,
     look: { skin: '#8a9a88', armor: '#5b4a45', armor2: '#3d302c', trim: '#b04030', legs: '#3d302c', boots: '#1d1512', head: 'horned', weapon: 'axe', eyes: '#ff4030', cape: '#5a1a18' },
     skills: [
@@ -717,6 +717,26 @@ const CLASSES = {
       { n: 'Ривок', i: '💨', mp: 12, cd: 9, range: 230, t: 'charge', p: 1.4, stun: 1.5 },
       { n: 'Вихор', i: '🌪️', mp: 20, cd: 7, t: 'aoe', radius: 72, p: 1.5, color: '217,200,176' },
       { n: 'Кривава лють', i: '💢', mp: 15, cd: 18, t: 'buff', buff: 'rage', dur: 7, d: '+50% шкоди, +20% швидкості' }]
+  },
+  hunter: {
+    faction: 'light', name: 'Мисливець', desc: 'Слідопит лісів із луком. Стріляє здалеку, б\'є залпом і кличе вірного вовка.',
+    hp: 110, mp: 90, atk: 15, range: 180, speed: 100, armor: .06,
+    look: { skin: '#e6b894', armor: '#3a5a2a', armor2: '#2a3e1e', trim: '#a07a3a', legs: '#4a3a2a', boots: '#2a1d14', head: 'hood', weapon: 'bow', cape: '#3a5a2a', eyes: '#d8e8c0' },
+    skills: [
+      { n: 'Постріл', i: '🏹', mp: 0, cd: 1.15, range: 180, t: 'proj', p: 1, color: '230,220,170' },
+      { n: 'Прицільний постріл', i: '🎯', mp: 15, cd: 5, range: 220, t: 'proj', p: 2.4, color: '160,255,120', big: 1 },
+      { n: 'Залп', i: '🌧️', mp: 22, cd: 8, range: 200, t: 'multi', p: 1.2, n3: 4, color: '200,255,150' },
+      { n: 'Вірний вовк', i: '🐺', mp: 30, cd: 22, t: 'summon', dur: 25, wolf: 1 }]
+  },
+  dk: {
+    faction: 'dark', name: 'Лицар смерті', desc: 'Колишній паладин, піднятий Порчею. Рунічний меч, крига і хватка смерті.',
+    hp: 155, mp: 70, atk: 15, range: 38, speed: 92, armor: .14,
+    look: { skin: '#9fb0c0', armor: '#2e3a52', armor2: '#1e2638', trim: '#7ac8ff', legs: '#1e2638', boots: '#101420', head: 'horned', weapon: 'sword', eyes: '#7ac8ff', cape: '#1a2440' },
+    skills: [
+      { n: 'Рунічний удар', i: '🗡️', mp: 0, cd: 1.2, range: 'melee', t: 'melee', p: 1.05 },
+      { n: 'Крижаний ланцюг', i: '⛓️', mp: 14, cd: 6, range: 170, t: 'proj', p: 1.5, slow: 3, color: '140,210,255' },
+      { n: 'Хватка смерті', i: '💀', mp: 12, cd: 10, range: 230, t: 'charge', p: 1.2, stun: 1.2 },
+      { n: 'Морозна аура', i: '❄️', mp: 22, cd: 8, t: 'aoe', radius: 85, p: 1.4, slow: 3, color: '140,210,255' }]
   }
 };
 const FACTION = {
@@ -724,6 +744,40 @@ const FACTION = {
   dark: { camp: 'Табір Тіні', elder: 'Лорд-Ліч Морвен', merchant: 'Гробар Скрип', fire: 'rgba(90,255,150,', flame: ['#caffd8', '#4fe08a', '#1a8a50'], banner: '#3a6a30' }
 };
 
+// ============ hero sprites (from reference atlas) ============
+const HERO = {}, HERO_SIDE = { mage: 1, paladin: 1, necro: 1, warrior: -1, hunter: -1, dk: 1 };
+for (const k of ['mage', 'paladin', 'necro', 'warrior', 'hunter', 'dk']) {
+  HERO[k] = {};
+  for (const v of ['front', 'side', 'back', 'portrait']) { const im = new Image(); im.src = 'assets/heroes/' + k + '_' + v + '.png'; HERO[k][v] = im; }
+}
+const heroReady = k => HERO[k] && HERO[k].front.complete && HERO[k].front.naturalWidth && HERO[k].side.complete && HERO[k].back.complete;
+function drawHero(c, x, y, cls, o) {
+  const H = HERO[cls], view = o.back ? 'back' : o.side ? 'side' : 'front', im = H[view];
+  const s = 54 / H.front.naturalHeight * (o.scale || 1);
+  const w = im.naturalWidth * s, h = im.naturalHeight * s;
+  const mv = o.moving, ph = o.walk || 0, atk = o.atk != null && o.atk >= 0 && o.atk < 1 ? o.atk : -1;
+  c.save(); c.translate(x, y);
+  if (o.alpha != null) c.globalAlpha = o.alpha;
+  const gl = c.createRadialGradient(0, -24, 2, 0, -24, 30); gl.addColorStop(0, o.glow || 'rgba(255,240,200,.16)'); gl.addColorStop(1, 'rgba(255,240,200,0)'); c.fillStyle = gl; c.fillRect(-30, -56, 60, 60);
+  c.fillStyle = 'rgba(0,0,0,.38)'; ell(c, 0, 0, 11 * (o.scale || 1), 4 * (o.scale || 1));
+  const bob = mv ? Math.abs(Math.sin(ph)) * 2 : Math.sin(ph * .5) * .5;
+  const lunge = atk >= 0 ? Math.sin(atk * Math.PI) : 0;
+  const dir = view === 'side' ? (o.face || 1) * (HERO_SIDE[cls] || 1) : 1;
+  c.translate(lunge * 5 * (o.face || 1), -bob);
+  c.rotate((mv ? Math.sin(ph) * .035 : 0) + lunge * .1 * (o.face || 1));
+  c.scale(dir, 1 + (mv ? Math.sin(ph * 2) * .015 : 0));
+  c.imageSmoothingEnabled = true;
+  c.drawImage(im, -w / 2, -h, w, h);
+  c.restore();
+  if (lunge > .05) {
+    const melee = cls === 'paladin' || cls === 'warrior' || cls === 'dk';
+    const col = { paladin: '255,230,150', warrior: '255,90,60', dk: '130,200,255', mage: '120,170,255', necro: '190,110,255', hunter: '180,255,120' }[cls];
+    c.save(); c.translate(x + (o.face || 1) * 10, y - 22);
+    if (melee) { c.strokeStyle = 'rgba(' + col + ',' + (lunge * .85) + ')'; c.lineWidth = 3.5; c.beginPath(); const a0 = (o.face || 1) > 0 ? -1.3 : Math.PI + 1.3, sw = (o.face || 1) * 2.4 * atk; c.arc(0, 4, 20, a0, a0 + sw, (o.face || 1) < 0); c.stroke(); }
+    else { c.fillStyle = 'rgba(' + col + ',' + (lunge * .5) + ')'; circ(c, 0, 0, 8 * lunge + 3); c.fillStyle = 'rgba(255,255,255,' + lunge * .7 + ')'; circ(c, 0, 0, 3 * lunge); }
+    c.restore();
+  }
+}
 // ============ humanoid drawing ============
 function drawHumanoid(c, x, y, o) {
   const L = o.look, s = o.scale || 1, face = o.face || 1;
@@ -1136,7 +1190,7 @@ function useSkill(i, fromAuto) {
   if (P.cds[i] > 0) { if (!fromAuto && i > 0) toast('Ще не готово'); return false; }
   if (P.mp < sk.mp) { if (!fromAuto) toast('Не вистачає мани'); return false; }
   if (P.stun > 0) return false;
-  const targeted = ['melee', 'proj', 'dot', 'drain', 'charge'].includes(sk.t);
+  const targeted = ['melee', 'proj', 'dot', 'drain', 'charge', 'multi'].includes(sk.t);
   if (targeted) {
     if (!alive(P.target)) { const n = nearestEnemy(P.x, P.y, 300); if (!n) { if (!fromAuto) toast('Немає цілі поруч'); return false; } P.target = n; }
     const d = dist(P, P.target);
@@ -1152,7 +1206,8 @@ function castSkill(i, t) {
   const sx = P.x + P.face * 10, sy = P.y - 22;
   switch (sk.t) {
     case 'melee': { const { d, crit } = playerDmg(sk.p); hitEnemy(t, d, P, crit); burst(t.x, t.y - 16, '#fff2c0', 6, 50, .3, 2); break; }
-    case 'proj': { const { d, crit } = playerDmg(sk.p); projs.push({ x: sx, y: sy, t, spd: sk.big ? 300 : 360, dmg: d, crit, col: sk.color, big: sk.big, owner: P }); break; }
+    case 'proj': { const { d, crit } = playerDmg(sk.p); projs.push({ x: sx, y: sy, t, spd: sk.big ? 300 : 360, dmg: d, crit, col: sk.color, big: sk.big, slow: sk.slow, owner: P }); break; }
+    case 'multi': { const ts = enemies.filter(e => alive(e) && dist(e, P) < (sk.range + 20)).sort((a, b) => dist(a, P) - dist(b, P)).slice(0, sk.n3 || 3); if (!ts.includes(t)) ts[0] = t; for (const e of ts) { const { d, crit } = playerDmg(sk.p); projs.push({ x: sx, y: sy, t: e, spd: 380, dmg: d, crit, col: sk.color, owner: P }); } break; }
     case 'dot': { const { d } = playerDmg(sk.p); t.dot = { dps: d / sk.dur, t: sk.dur, acc: 0, src: P }; burst(t.x, t.y - 18, '#6dff8a', 16, 40, .8, 2.5, -30); hitEnemy(t, 1, P, false, '#6dff8a'); break; }
     case 'drain': { const { d, crit } = playerDmg(sk.p); projs.push({ x: sx, y: sy, t, spd: 320, dmg: d, crit, col: sk.color, drain: 1, owner: P }); break; }
     case 'aoe': {
@@ -1171,8 +1226,8 @@ function castSkill(i, t) {
     }
     case 'summon': {
       const a = Math.random() * 6.28; let mx = P.x + Math.cos(a) * 24, my = P.y + Math.sin(a) * 24; if (!canStand(mx, my, 7)) { mx = P.x; my = P.y; }
-      minion = { kind: 'minion', x: mx, y: my, hp: Math.round(60 * lvlMult(P.lvl) * 1.5), life: sk.dur, atkT: 0, walk: 0, face: 1, moving: false, target: null, atkAnim: -1, cr: 6, flash: 0 };
-      minion.maxHp = minion.hp; burst(mx, my - 10, '#6dff8a', 24, 60, .8, 3, -40); ring(mx, my, 30, '109,255,138'); break;
+      minion = { kind: 'minion', wolf: sk.wolf, x: mx, y: my, hp: Math.round(60 * lvlMult(P.lvl) * 1.5), life: sk.dur, atkT: 0, walk: 0, face: 1, moving: false, target: null, atkAnim: -1, cr: 6, flash: 0 };
+      minion.maxHp = minion.hp; burst(mx, my - 10, sk.wolf ? '#d8e8c0' : '#6dff8a', 24, 60, .8, 3, -40); ring(mx, my, 30, '109,255,138'); break;
     }
     case 'charge': { P.dash = { t, time: .45, dmg: playerDmg(sk.p), stun: sk.stun }; P.path = null; break; }
   }
@@ -1264,7 +1319,7 @@ function followPath(e, spd, dt) {
   if (m < st * .2) { e.stuck = (e.stuck || 0) + dt; if (e.stuck > .4) { e.path = null; e.stuck = 0; } } else e.stuck = 0;
   return m;
 }
-function setFacing(e, dx, dy) { if (Math.abs(dx) > .01) e.face = dx < 0 ? -1 : 1; e.back = dy < -Math.abs(dx) * 1.2; }
+function setFacing(e, dx, dy) { if (Math.abs(dx) > .01) e.face = dx < 0 ? -1 : 1; e.back = dy < -Math.abs(dx) * 1.2; e.vside = Math.abs(dx) > Math.abs(dy) * .7; }
 function moveTowards(e, tx, ty, spd, dt, stopAt = 0) {
   const dx = tx - e.x, dy = ty - e.y, l = Math.hypot(dx, dy); if (l <= stopAt) return 0;
   const st = Math.min(l - stopAt, spd * dt); setFacing(e, dx, dy);
@@ -1407,6 +1462,7 @@ function updateProjs(dt) {
       projs.splice(i, 1);
       if (pr.owner === P || pr.owner.kind === 'ally') {
         hitEnemy(t, pr.dmg, pr.owner, pr.crit, pr.drain ? '#ff8aa0' : null); burst(t.x, ty, 'rgb(' + pr.col + ')', pr.big ? 18 : 8, pr.big ? 90 : 50, .4, pr.big ? 3.5 : 2.5);
+        if (pr.slow && alive(t)) t.slow = pr.slow;
         if (pr.drain && pr.owner === P) { const h = Math.round(pr.dmg * .6); P.hp = Math.min(P.maxHp, P.hp + h); floatTxt(P.x, P.y - 40, '+' + h, '#7dff9a', 13); }
       } else {
         burst(t.x, ty, 'rgb(' + pr.col + ')', 8, 40, .4, 2.5);
@@ -1535,7 +1591,8 @@ function drawThing(it) {
     const b = it.buffs;
     if (b.shield > 0) { c.fillStyle = 'rgba(255,230,150,' + (.18 + Math.sin(time * 6) * .05) + ')'; ell(c, it.x, it.y - 16, 18, 22); }
     if (b.rage > 0) { c.fillStyle = 'rgba(255,50,40,.18)'; ell(c, it.x, it.y - 14, 16, 20); if (Math.random() < .3) parts.push({ x: it.x + rnd(-8, 8), y: it.y - rnd(0, 30), vx: 0, vy: -30, life: .5, max: .5, col: '#ff4030', size: 2, grav: 0 }); }
-    drawHumanoid(c, it.x, it.y, { look: it.C.look, face: it.face, back: it.back, walk: it.walk, moving: it.moving, atk: it.atkAnim, alpha: it.flash > 0 ? .6 : 1 });
+    if (heroReady(it.clsId)) drawHero(c, it.x, it.y, it.clsId, { face: it.face, back: it.back, side: it.vside, walk: it.walk, moving: it.moving, atk: it.atkAnim, alpha: it.flash > 0 ? .6 : 1 });
+    else drawHumanoid(c, it.x, it.y, { look: it.C.look, face: it.face, back: it.back, walk: it.walk, moving: it.moving, atk: it.atkAnim, alpha: it.flash > 0 ? .6 : 1 });
     return;
   }
   if (it.kind === 'enemy') {
@@ -1556,6 +1613,7 @@ function drawThing(it) {
   }
   if (it.kind === 'ally') { drawHumanoid(c, it.x, it.y, { look: it.look, face: it.face, back: it.back, walk: it.walk, moving: it.moving, atk: it.atkAnim, alpha: it.flash > 0 ? .6 : 1 }); return; }
   if (it.kind === 'npc') { drawHumanoid(c, it.x, it.y, { look: it.look, face: it.face, walk: time * 2, moving: false }); return; }
+  if (it.kind === 'minion' && it.wolf) { drawWolf(c, it.x, it.y, { D: WOLF_PET, face: it.face, walk: it.walk, moving: it.moving, atk: it.atkAnim, alpha: Math.min(1, it.life) * (it.flash > 0 ? .6 : 1), scale: .95 }); return; }
   if (it.kind === 'minion') { drawHumanoid(c, it.x, it.y, { look: MINION_LOOK, face: it.face, back: it.back, walk: it.walk, moving: it.moving, atk: it.atkAnim, alpha: Math.min(1, it.life) * (it.flash > 0 ? .6 : .95), scale: .9 }); return; }
   // objects
   let s;
@@ -1586,6 +1644,7 @@ function drawThing(it) {
   c.drawImage(s, it.x - s.w / 2, it.y + (it.type === 'wall' ? 3 : 0) - s.h, s.w, s.h);
   if (it.torch) { const fy = it.y - 34; c.fillStyle = '#3a2a1a'; c.fillRect(it.x - 2, fy, 4, 9); for (let k = 0; k < 3; k++) { c.fillStyle = ['#ffdf6a', '#ff8a2a', '#d0401a'][k]; const h = 9 - k * 2 + Math.sin(time * 12 + it.x + k) * 2; c.beginPath(); c.moveTo(it.x - 4 + k, fy); c.quadraticCurveTo(it.x, fy - h * 1.6, it.x + 4 - k, fy); c.fill(); } }
 }
+const WOLF_PET = { col: '#8a8478', col2: '#5a554c', eye: '#9fe0ff' };
 const MINION_LOOK = { skin: '#d4e8cc', armor: '#d4e8cc', armor2: '#b8ccb0', trim: '#6dff8a', legs: '#c8dcc0', boots: '#c8dcc0', head: 'skull', weapon: 'rsword', bones: 1, rags: 1, eyes: '#6dff8a' };
 function drawFire(o) {
   const c = ctx, x = o.x, y = o.y - 4, F = FACTION[P ? P.faction : 'light'].flame;
@@ -1714,6 +1773,8 @@ function show(id) { for (const s of document.querySelectorAll('.screen')) s.hidd
 function previewCanvas(cvs, cls, t) {
   const g = cvs.getContext('2d'), w = cvs.width, h = cvs.height; g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, w, h);
   const gr = g.createRadialGradient(w / 2, h * .75, 4, w / 2, h * .7, w * .5); gr.addColorStop(0, CLASSES[cls].faction === 'light' ? 'rgba(80,120,220,.35)' : 'rgba(80,200,110,.3)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(0, 0, w, h);
+  const pim = HERO[cls] && HERO[cls].portrait;
+  if (pim && pim.complete && pim.naturalWidth) { const s = Math.min(w / pim.naturalWidth, h / pim.naturalHeight) * .98, b = Math.sin(t * 1.6) * 1.2; g.imageSmoothingEnabled = true; g.drawImage(pim, (w - pim.naturalWidth * s) / 2, h - pim.naturalHeight * s + b - 1, pim.naturalWidth * s, pim.naturalHeight * s); return; }
   const sc = w / 42;
   drawHumanoid(g, w / 2, h * .86, { look: CLASSES[cls].look, face: 1, walk: t * 2, moving: false, scale: sc, atk: (t % 3) < 1 ? (t % 3) : -1 });
 }
@@ -1737,9 +1798,9 @@ function buildClassCards() {
   for (const id in CLASSES) {
     const C = CLASSES[id]; if (C.faction !== pickFaction) continue;
     const d = document.createElement('div'); d.className = 'card ' + C.faction; d.tabIndex = 0; d.dataset.cls = id;
-    d.innerHTML = `<canvas width="120" height="120" data-preview="${id}"></canvas><h3>${C.name}</h3><p>${C.desc}</p>
+    d.innerHTML = `<canvas width="160" height="200" data-preview="${id}"></canvas><h3>${C.name}</h3><p>${C.desc}</p>
       <div class="stats"><span>❤️ ${C.hp}</span><span>💧 ${C.mp}</span><span>⚔️ ${C.atk}</span><span>${C.range > 60 ? '🏹 Дальній' : '🗡️ Ближній'}</span></div>
-      <div class="skills">${C.skills.map(s => `<span title="${s.n}">${s.i}</span>`).join('')}</div>`;
+      <div class="cskills">${C.skills.map(s => `<span title="${s.n}">${s.i}</span>`).join('')}</div>`;
     const go = () => { pickClass = id; $('nameIn').value = randomName(C.faction); show('scrName'); };
     d.addEventListener('click', go); d.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
     box.appendChild(d);
@@ -1832,9 +1893,9 @@ const TIERS = {
   jewel: [['Мідний', 'Мідна', 'Мідні'], ['Срібний', 'Срібна', 'Срібні'], ['Золотий', 'Золота', 'Золоті'], ['Платиновий', 'Платинова', 'Платинові'], ['Рунічний', 'Рунічна', 'Рунічні'], ['Драконячий', 'Драконяча', 'Драконячі'], ['Зоряний', 'Зоряна', 'Зоряні']]
 };
 const GI = { m: 0, f: 1, p: 2 };
-const WEAP = { paladin: [['Меч', 'm'], ['Довгий меч', 'm'], ['Клинок', 'm']], mage: [['Посох', 'm'], ['Жезл', 'm']], necro: [['Коса', 'f'], ['Кістяний посох', 'm']], warrior: [['Сокира', 'f'], ['Секира', 'f'], ['Бойовий молот', 'm']] };
-const WICON = { paladin: '🗡️', mage: '🪄', necro: '🦴', warrior: '🪓' };
-const isPlate = cls => cls === 'paladin' || cls === 'warrior';
+const WEAP = { paladin: [['Меч', 'm'], ['Довгий меч', 'm'], ['Клинок', 'm']], mage: [['Посох', 'm'], ['Жезл', 'm']], necro: [['Коса', 'f'], ['Кістяний посох', 'm']], warrior: [['Сокира', 'f'], ['Секира', 'f'], ['Бойовий молот', 'm']], hunter: [['Лук', 'm'], ['Довгий лук', 'm'], ['Арбалет', 'm']], dk: [['Рунічний меч', 'm'], ['Двуручний меч', 'm']] };
+const WICON = { paladin: '🗡️', mage: '🪄', necro: '🦴', warrior: '🪓', hunter: '🏹', dk: '⚔️' };
+const isPlate = cls => cls === 'paladin' || cls === 'warrior' || cls === 'dk';
 let itemSeq = 0;
 function makeItem(slot, lvl, rar, cls) {
   cls = cls || (P ? P.clsId : 'paladin'); lvl = clamp(Math.round(lvl), 1, 30); rar = clamp(rar, 0, 3);

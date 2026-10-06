@@ -43,8 +43,8 @@ h2{font-family:var(--f-title);font-weight:400;color:var(--gold);margin:0 0 18px;
 .card:hover,.card:focus-visible{border-color:var(--gold);transform:translateY(-2px)}
 .card h3{margin:6px 0 4px;font-size:22px;color:var(--gold)}
 .card p{margin:4px 0;color:var(--muted);font-size:14px;line-height:1.35}
-.card canvas{width:120px;height:120px;image-rendering:pixelated}
-.card .skills{display:flex;justify-content:center;gap:6px;margin-top:8px;font-size:20px}
+.card canvas{width:120px;height:150px}
+.card .cskills{display:flex;justify-content:center;gap:6px;margin-top:8px;font-size:20px}
 .card .stats{display:flex;justify-content:center;gap:10px;font-size:13px;margin-top:6px;color:var(--ink)}
 .card.light{box-shadow:0 0 0 1px rgba(59,111,209,.4),0 0 24px rgba(59,111,209,.18)}
 .card.dark{box-shadow:0 0 0 1px rgba(95,191,106,.4),0 0 24px rgba(95,191,106,.16)}
@@ -165,16 +165,16 @@ input.name{width:min(320px,100%);font-family:var(--f);font-size:22px;text-align:
   <h2>Обери свій клан</h2>
   <div class="cards">
     <div class="card light" tabindex="0" data-f="light">
-      <canvas width="120" height="120" data-preview="paladin"></canvas>
+      <canvas width="160" height="200" data-preview="paladin"></canvas>
       <h3>Люди</h3>
       <p>Орден Світанку тримає останній табір серед проклятих земель. Світло, сталь і віра.</p>
-      <p style="color:#9fc3ff">Паладин · Маг</p>
+      <p style="color:#9fc3ff">Паладин · Маг · Мисливець</p>
     </div>
     <div class="card dark" tabindex="0" data-f="dark">
-      <canvas width="120" height="120" data-preview="necro"></canvas>
+      <canvas width="160" height="200" data-preview="necro"></canvas>
       <h3>Нежить</h3>
       <p>Ті, хто повстав із могил, але зберіг волю. Тінь, кістки й голод до сили.</p>
-      <p style="color:#9fe7a8">Некромант · Воїн</p>
+      <p style="color:#9fe7a8">Некромант · Воїн · Лицар смерті</p>
     </div>
   </div>
   <button class="btn ghost back" data-back="scrTitle">Назад</button>
@@ -190,7 +190,7 @@ input.name{width:min(320px,100%);font-family:var(--f);font-size:22px;text-align:
 <!-- name -->
 <div class="screen" id="scrName" hidden>
   <h2>Ім'я героя</h2>
-  <canvas id="namePreview" width="140" height="140" style="width:140px;height:140px;image-rendering:pixelated"></canvas>
+  <canvas id="namePreview" width="200" height="250" style="width:150px;height:188px"></canvas>
   <input class="name" id="nameIn" maxlength="14" autocomplete="off" spellcheck="false">
   <button class="btn" id="bStart">У бій!</button>
   <button class="btn ghost back" data-back="scrClass">Назад</button>
