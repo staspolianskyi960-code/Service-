@@ -157,6 +157,16 @@ input.name{width:min(320px,100%);font-family:var(--f);font-size:22px;text-align:
 .dialog .joinrow{display:flex;gap:8px}
 .dialog .joinrow input{flex:1;min-width:0;font-family:var(--f);font-size:22px;letter-spacing:6px;text-transform:uppercase;text-align:center;padding:8px;border-radius:10px;border:2px solid var(--line);background:#1a1326;color:var(--ink);-webkit-user-select:text;user-select:text}
 .dialog .warn{color:#ff8a7a}
+#bTalk{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(max(10px,env(safe-area-inset-bottom)) + 48px);padding:9px 16px;border-radius:20px;border:2px solid var(--gold2);background:rgba(22,16,32,.92);color:var(--gold);font-family:var(--f);font-size:15px;font-weight:700;box-shadow:0 3px 10px rgba(0,0,0,.5);max-width:80vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dialog .qlist{display:flex;flex-direction:column;gap:6px;margin:8px 0}
+.dialog .qrow{display:flex;align-items:center;gap:10px;text-align:left;padding:10px 12px;border-radius:10px;border:2px solid var(--line);background:#1a1326;color:var(--ink);font-family:var(--f);font-size:15px}
+.dialog .qrow b{flex:1}.dialog .qrow small{color:var(--muted);font-size:12px}
+.dialog .qrow .qm{font-size:20px;font-weight:700;width:18px;text-align:center}
+.dialog ul.objs{margin:6px 0;padding-left:20px;line-height:1.6;font-size:14px}
+.dialog .rw{margin:8px 0;padding:8px 10px;border-radius:8px;background:#231a33;color:var(--gold);font-size:14px}
+.dialog .jq{border:1px solid #3a2d48;border-radius:10px;padding:8px 10px;margin:6px 0;background:#140e1e}
+.dialog .jq.tr{border-color:var(--gold2)}
+.dialog .jq .jt b{display:block;color:var(--gold)}.dialog .jq .jt small{color:var(--muted);font-size:12px}
 </style>
 </head>
 <body>
@@ -223,7 +233,7 @@ input.name{width:min(320px,100%);font-family:var(--f);font-size:22px;text-align:
   <div class="topr">
     <div style="display:flex;gap:6px">
       <div class="gold">🪙 <span id="hGold">0</span></div>
-      <button class="iconbtn" id="bNet" aria-label="Група">👥</button><button class="iconbtn" id="bInv" aria-label="Інвентар">🎒</button><button class="iconbtn" id="bMenu" aria-label="Меню">☰</button>
+      <button class="iconbtn" id="bJournal" aria-label="Журнал">📜</button><button class="iconbtn" id="bNet" aria-label="Група">👥</button><button class="iconbtn" id="bInv" aria-label="Інвентар">🎒</button><button class="iconbtn" id="bMenu" aria-label="Меню">☰</button>
     </div>
     <canvas id="minimap" width="96" height="72"></canvas>
     <div class="quest" id="quest"><div class="ql" id="qL"></div><div class="qt" id="qT"></div><div id="qD"></div><div class="qp" id="qP"></div></div>
@@ -231,10 +241,11 @@ input.name{width:min(320px,100%);font-family:var(--f);font-size:22px;text-align:
   <div class="skills" id="skills"></div>
   <div id="joy" hidden><i></i></div>
   <div id="chatlog"></div>
+  <button id="bTalk" hidden><span id="bTalkN">💬</span></button>
   <button class="iconbtn" id="bChat" aria-label="Чат">💬</button>
   <div id="chatbox" hidden><input id="chatIn" maxlength="120" placeholder="Повідомлення групі…" autocomplete="off"><button class="sbtn" id="chatSend">➤</button></div>
   <div class="toast" id="toast" style="opacity:0"></div>
-  <div class="keys">WASD — рух · 1–4 — вміння · Q/E — зілля · Tab — ціль · I — інвентар · Enter — чат</div>
+  <div class="keys">WASD — рух · 1–4 — вміння · Q/E — зілля · Tab — ціль · I — інвентар · Enter — чат · F — говорити · J — журнал</div>
 </div>
 
 <div class="dialog" id="dialog" hidden></div>

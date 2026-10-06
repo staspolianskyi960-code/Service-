@@ -1087,7 +1087,7 @@ function makePlayer(d) {
   P = { kind: 'player', clsId: d.cls, C, faction: C.faction, name: d.name, lvl: d.lvl || 1, xp: d.xp || 0, gold: d.gold || 0, hpPot: d.hpPot != null ? d.hpPot : 3, mpPot: d.mpPot != null ? d.mpPot : 2,
     qs: d.qs || { cursed: { i: d.quest || 0, p: d.qprog || 0 } }, questIdx: 0, qprog: 0,
     x: tc(CAMP.tx), y: tc(CAMP.ty) + 70, face: 1, back: false, walk: 0, moving: false, cds: [0, 0, 0, 0], buffs: {}, target: null, path: null, autoAtk: false,
-    pending: -1, talkTo: null, atkAnim: -1, stun: 0, dead: false, combatT: 99, dash: null, flash: 0, cr: 7, slow: 0, portalLock: true, dlock: 1, bag: d.bag || [], eq: d.eq || {} };
+    pending: -1, talkTo: null, atkAnim: -1, stun: 0, dead: false, combatT: 99, dash: null, flash: 0, cr: 7, slow: 0, portalLock: true, dlock: 1, bag: d.bag || [], eq: d.eq || {}, quests: d.quests || {}, qdone: d.qdone || [], track: d.track || null };
   if (!d.eq) P.eq.weapon = makeItem('weapon', 1, 0, d.cls);
   syncQuest();
   if (d.x && d.y && canStand(d.x, d.y, 7)) { P.x = d.x; P.y = d.y; }
@@ -1097,15 +1097,16 @@ function makePlayer(d) {
 function makeNpcs() {
   const F = FACTION[P.faction], f = P.faction;
   if (M.type === 'dungeon') { npcs = []; return; }
+  const qn = (QNPCS[M.id] || []).map(d => ({ kind: 'npc', role: 'quest', qid: d.id, name: TX(d.n), greet: d.greet, look: NPC_LOOKS[TX(d.look)] || NPC_LOOKS.trader,
+    x: d.tx != null ? tc(d.tx) : tc(CAMP.tx) + d.dx, y: d.ty != null ? tc(d.ty) : tc(CAMP.ty) + d.dy, face: (d.dx || 0) > 0 ? -1 : 1 }));
   if (M.type === 'city') {
     npcs = M.shopNpcs.slice();
-    npcs.push({ kind: 'npc', role: 'elder', name: M.elder.name, x: tc(CAMP.tx + M.elder.dx), y: tc(CAMP.ty + M.elder.dy), face: 1, look: NPC_LOOKS[M.fac === 'light' ? 'guard' : 'dguard'] });
-    return;
-  }
-  npcs = [
-    { kind: 'npc', role: 'elder', name: F.elder, x: tc(CAMP.tx) - 58, y: tc(CAMP.ty) + 26, face: 1, look: ELDER_LOOK[f] },
+    npcs.push({ kind: 'npc', role: 'elder', qid: 'captain', name: M.elder.name, greet: (LORE[M.id] || [])[f === 'light' ? 0 : 1], x: tc(CAMP.tx + M.elder.dx), y: tc(CAMP.ty + M.elder.dy), face: 1, look: NPC_LOOKS[M.fac === 'light' ? 'guard' : 'dguard'] });
+  } else npcs = [
+    { kind: 'npc', role: 'elder', qid: 'elder', name: F.elder, x: tc(CAMP.tx) - 58, y: tc(CAMP.ty) + 26, face: 1, look: ELDER_LOOK[f] },
     { kind: 'npc', role: 'shop', kinds: ['potion', 'weapon', 'armor'], name: F.merchant, x: tc(CAMP.tx) + 60, y: tc(CAMP.ty) + 26, face: -1, look: NPC_LOOKS[f === 'light' ? 'trader' : 'dtrader'] }
   ];
+  npcs.push(...qn, ...makeLivingNpcs());
 }
 function changeMap(id, from) {
   const cur = questFor(P.questIdx);
@@ -1136,7 +1137,7 @@ function writeSave() {
   if (!dg) P.qs[M.id] = { i: P.questIdx, p: P.qprog };
   const qs = Object.assign({}, P.qs); delete qs.dungeon;
   const px = dg ? (M.entr ? M.entr.x : 0) : P.x, py = dg ? (M.entr ? M.entr.y : 0) : P.y;
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ cls: P.clsId, name: P.name, lvl: P.lvl, xp: P.xp, gold: P.gold, hpPot: P.hpPot, mpPot: P.mpPot, qs, map: dg ? M.parent : M.id, x: Math.round(px), y: Math.round(py), bag: P.bag, eq: P.eq })); } catch (e) { }
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ cls: P.clsId, name: P.name, lvl: P.lvl, xp: P.xp, gold: P.gold, hpPot: P.hpPot, mpPot: P.mpPot, qs, map: dg ? M.parent : M.id, x: Math.round(px), y: Math.round(py), bag: P.bag, eq: P.eq, quests: P.quests, qdone: P.qdone, track: P.track })); } catch (e) { }
 }
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (e) { } }
 
@@ -1176,8 +1177,9 @@ function killEnemy(e, fromNet) {
   if (Math.random() < (D.boss ? 1 : .08)) { if (Math.random() < .6) P.hpPot++; else P.mpPot++; floatTxt(e.x, e.y - 64, '+зілля', '#ff8aa0', 12); }
   dropLoot(e, D);
   if (e.dBoss) dungeonCleared(e);
-  const q = questFor(P.questIdx);
-  if (M.type !== 'dungeon' && q.type === e.type && P.qprog < q.n) {
+  qOnKill(e);
+  const q = { type: '' };
+  if (false) {
     P.qprog++;
     if (P.qprog >= q.n) { P.gold += q.gold; gainXp(q.xp); toast('Завдання виконано: ' + q.t + '  +' + q.xp + ' досвіду, +' + q.gold + ' 🪙'); P.questIdx++; P.qprog = 0; writeSave(); }
   }
@@ -1283,6 +1285,8 @@ addEventListener('keydown', e => {
   keys[e.code] = true;
   if (state !== 'game') return;
   if (e.code >= 'Digit1' && e.code <= 'Digit4') { useSkill(+e.code.slice(5) - 1); pressFx(+e.code.slice(5) - 1); }
+  if (e.code === 'KeyJ') { if (!$('dialog').hidden && $('dialog').querySelector('.jq, .gl') && $('dialog').innerText.startsWith('📜')) closeDialog(); else openJournal(); }
+  if (e.code === 'KeyF') { const b = $('bTalk'); if (!b.hidden && b.onclick) b.onclick(); }
   if (e.code === 'KeyI' || e.code === 'KeyB') { if (!$('dialog').hidden && $('dialog').querySelector('.bag')) closeDialog(); else openInventory(); }
   if (e.code === 'KeyQ') drinkPotion('hp'); if (e.code === 'KeyE') drinkPotion('mp');
   if (e.code === 'Tab') { e.preventDefault(); const n = nearestEnemy(P.x, P.y, 400); if (n) { P.target = n; } }
@@ -1578,17 +1582,26 @@ function render() {
   if (state !== 'menu') {
     ctx.font = 'bold 9px Philosopher, serif'; ctx.textAlign = 'center';
     for (const o of portals) { const fl = o.fac && P && o.fac !== P.faction, lk = fl || (P && P.lvl < o.lvl), T2 = MAPS[o.to], t1 = o.exit ? '⇦ Вийти з підземелля' : '→ ' + T2.name, t2 = o.exit ? T2.name : fl ? '🔒 ворожа столиця' : lk ? 'з ' + o.lvl + ' рівня' : T2.type === 'city' ? T2.lv : 'рівні ' + T2.lv; ctx.fillStyle = '#000'; ctx.fillText(t1, o.x + .7, o.y - 70.3); ctx.fillStyle = 'rgb(' + o.col + ')'; ctx.fillText(t1, o.x, o.y - 71); ctx.fillStyle = '#000'; ctx.fillText(t2, o.x + .7, o.y - 60.3); ctx.fillStyle = lk ? '#ff7a6a' : '#ffe7b0'; ctx.fillText(t2, o.x, o.y - 61); }
-    for (const n of npcs) { ctx.fillStyle = '#000'; ctx.fillText(n.name, n.x + .7, n.y - 44.3); ctx.fillStyle = '#ffd97a'; ctx.fillText(n.name, n.x, n.y - 45); ctx.font = 'bold 13px sans-serif'; ctx.fillText(n.role === 'elder' ? '❗' : (SHOP_ICON[n.kinds[0]] || '🪙'), n.x, n.y - 56 + Math.sin(time * 3) * 2); ctx.font = 'bold 9px Philosopher, serif'; }
+    for (const n of npcs) {
+      if (n.x < camX - 60 || n.x > camX + vw + 60 || n.y < camY - 60 || n.y > camY + vh + 80) continue;
+      const amb = n.role === 'citizen' || (n.role === 'guard' && !n.qid);
+      if (amb) { if (Math.hypot(n.x - P.x, n.y - P.y) < 110) { ctx.font = '8px Philosopher, serif'; ctx.fillStyle = '#000'; ctx.fillText(n.name, n.x + .6, n.y - 43.4); ctx.fillStyle = '#d8d0c0'; ctx.fillText(n.name, n.x, n.y - 44); ctx.font = 'bold 9px Philosopher, serif'; } continue; }
+      ctx.fillStyle = '#000'; ctx.fillText(n.name, n.x + .7, n.y - 44.3); ctx.fillStyle = '#ffd97a'; ctx.fillText(n.name, n.x, n.y - 45);
+      const mk = npcMark(n), ic = mk ? mk.t : n.kinds ? (SHOP_ICON[n.kinds[0]] || '🪙') : null;
+      if (ic) { ctx.font = 'bold ' + (mk ? 16 : 12) + 'px sans-serif'; if (mk) { ctx.fillStyle = '#000'; ctx.fillText(ic, n.x + 1, n.y - 55 + Math.sin(time * 3) * 2); ctx.fillStyle = mk.c; } ctx.fillText(ic, n.x, n.y - 56 + Math.sin(time * 3) * 2); ctx.font = 'bold 9px Philosopher, serif'; }
+    }
     for (const o of dentrs) { const t1 = '⚔ ' + (DUNGEONS[M.id] ? DUNGEONS[M.id].name : 'Підземелля'), t2 = 'підземелля · рів. ' + (DUNGEONS[M.id] ? DUNGEONS[M.id].lvl : '') + '+'; ctx.fillStyle = '#000'; ctx.fillText(t1, o.x + .7, o.y - 80.3); ctx.fillStyle = '#c9a0ff'; ctx.fillText(t1, o.x, o.y - 81); ctx.fillStyle = '#000'; ctx.fillText(t2, o.x + .7, o.y - 70.3); ctx.fillStyle = '#ffe7b0'; ctx.fillText(t2, o.x, o.y - 71); }
     for (const a of allies) { if (a.dead) continue; ctx.fillStyle = '#000'; ctx.fillText(a.name, a.x + .7, a.y - 46.3); ctx.fillStyle = '#9fe0ff'; ctx.fillText(a.name, a.x, a.y - 47); ctx.fillStyle = '#000'; ctx.fillRect(a.x - 13, a.y - 44, 26, 4); ctx.fillStyle = '#3ac060'; ctx.fillRect(a.x - 12, a.y - 43, 24 * a.hp / a.maxHp, 2); }
     if (NET.role) for (const rp of NET.remotesHere()) { if (rp.dead) continue; ctx.fillStyle = '#000'; ctx.fillText(rp.n + ' · ' + rp.l, rp.x + .7, rp.y - 64.3); ctx.fillStyle = rp.f === 'light' ? '#9fc3ff' : '#9fe7a8'; ctx.fillText(rp.n + ' · ' + rp.l, rp.x, rp.y - 65); ctx.fillStyle = '#000'; ctx.fillRect(rp.x - 14, rp.y - 61, 28, 4); ctx.fillStyle = '#3ac060'; ctx.fillRect(rp.x - 13, rp.y - 60, 26 * clamp(rp.hp / rp.maxHp, 0, 1), 2); }
     const bubble = (who) => { if (!(who.chatT > 0) || !who.chat) return; ctx.font = '9px Philosopher, serif'; const tw = Math.min(150, ctx.measureText(who.chat).width + 10), bx = who.x - tw / 2, by = who.y - 84; ctx.globalAlpha = Math.min(1, who.chatT); ctx.fillStyle = 'rgba(20,14,30,.88)'; rr(ctx, bx, by, tw, 15, 5); ctx.fill(); ctx.strokeStyle = 'rgba(232,193,112,.6)'; ctx.lineWidth = 1; ctx.stroke(); ctx.fillStyle = '#efe6d6'; ctx.fillText(who.chat.length > 28 ? who.chat.slice(0, 27) + '…' : who.chat, who.x, by + 11); ctx.globalAlpha = 1; ctx.font = 'bold 9px Philosopher, serif'; };
+    for (const n of npcs) if (n.chatT > 0) bubble(n);
     if (P) { if (P.chatT > 0) P.chatT -= 1 / 60; bubble(P); } if (NET.role) for (const rp of NET.remotesHere()) bubble(rp);
     if (P && !P.dead) { ctx.fillStyle = '#000'; ctx.fillText(P.name, P.x + .7, P.y - 59.3); ctx.fillStyle = P.faction === 'light' ? '#9fc3ff' : '#9fe7a8'; ctx.fillText(P.name, P.x, P.y - 60); }
     // quest arrow
-    if (P && !P.dead && M.type !== 'city') {
-      const q = questFor(P.questIdx), qx = tc(q.at.tx), qy = tc(q.at.ty), d = Math.hypot(qx - P.x, qy - P.y);
-      if (d > 9 * T) { const a = Math.atan2(qy - P.y, qx - P.x), ax = P.x + Math.cos(a) * 44, ay = P.y - 12 + Math.sin(a) * 30; ctx.save(); ctx.translate(ax, ay); ctx.rotate(a); ctx.globalAlpha = .75 + Math.sin(time * 4) * .2; ctx.fillStyle = '#e8c170'; ctx.beginPath(); ctx.moveTo(9, 0); ctx.lineTo(-5, -6); ctx.lineTo(-2, 0); ctx.lineTo(-5, 6); ctx.closePath(); ctx.fill(); ctx.restore(); }
+    const tq = P && P.track && P.quests[P.track] ? QBY[P.track] : null, tg = tq ? qTarget(tq) : M.type === 'dungeon' && ARENA ? { x: tc(ARENA.tx), y: tc(ARENA.ty) } : null;
+    if (P && !P.dead && tg) {
+      const qx = tg.x, qy = tg.y, d = Math.hypot(qx - P.x, qy - P.y);
+      if (d > 5 * T) { const a = Math.atan2(qy - P.y, qx - P.x), ax = P.x + Math.cos(a) * 44, ay = P.y - 12 + Math.sin(a) * 30; ctx.save(); ctx.translate(ax, ay); ctx.rotate(a); ctx.globalAlpha = .75 + Math.sin(time * 4) * .2; ctx.fillStyle = '#e8c170'; ctx.beginPath(); ctx.moveTo(9, 0); ctx.lineTo(-5, -6); ctx.lineTo(-2, 0); ctx.lineTo(-5, 6); ctx.closePath(); ctx.fill(); ctx.restore(); }
     }
   }
   for (const f of floats) { ctx.globalAlpha = clamp(f.life * 1.5, 0, 1); ctx.font = 'bold ' + f.size + 'px Philosopher, serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#000'; ctx.fillText(f.text, f.x + 1, f.y + 1); ctx.fillStyle = f.col; ctx.fillText(f.text, f.x, f.y); }
@@ -1647,7 +1660,7 @@ function drawThing(it) {
   }
   if (it.kind === 'remote') { if (it.dead && !sheetReady(it.c)) return; if (heroReady(it.c)) drawHero(c, it.x, it.y, it.c, { face: it.face, back: it.back, side: it.vside, walk: it.walk, moving: it.moving, atk: it.dead ? -1 : it.atkAnim, deadT: it.dead ? time - (it.deadAt || time) : null, seed: 3, glow: it.f === 'light' ? 'rgba(150,190,255,.18)' : 'rgba(150,255,170,.16)' }); else if (CLASSES[it.c]) drawHumanoid(c, it.x, it.y, { look: CLASSES[it.c].look, face: it.face, back: it.back, walk: it.walk, moving: it.moving, atk: it.atkAnim }); return; }
   if (it.kind === 'ally') { drawHumanoid(c, it.x, it.y, { look: it.look, face: it.face, back: it.back, walk: it.walk, moving: it.moving, atk: it.atkAnim, alpha: it.flash > 0 ? .6 : 1 }); return; }
-  if (it.kind === 'npc') { drawHumanoid(c, it.x, it.y, { look: it.look, face: it.face, walk: time * 2, moving: false }); return; }
+  if (it.kind === 'npc') { drawHumanoid(c, it.x, it.y, { look: it.look, face: it.face, back: it.back, walk: it.moving ? it.walk : time * 2, moving: !!it.moving }); return; }
   if (it.kind === 'minion' && it.wolf) { drawWolf(c, it.x, it.y, { D: WOLF_PET, face: it.face, walk: it.walk, moving: it.moving, atk: it.atkAnim, alpha: Math.min(1, it.life) * (it.flash > 0 ? .6 : 1), scale: .95 }); return; }
   if (it.kind === 'minion') { drawHumanoid(c, it.x, it.y, { look: MINION_LOOK, face: it.face, back: it.back, walk: it.walk, moving: it.moving, atk: it.atkAnim, alpha: Math.min(1, it.life) * (it.flash > 0 ? .6 : .95), scale: .9 }); return; }
   // objects
@@ -1711,8 +1724,8 @@ function drawMinimap() {
   mmc.clearRect(0, 0, mm.width, mm.height);
   mmc.drawImage(miniBase, cx, cy, vw, vh, 0, 0, mm.width, mm.height);
   const sc = mm.width / vw;
-  const q = questFor(P.questIdx);
-  mmc.fillStyle = '#ffd54a'; const qx = (q.at.tx - cx) * sc, qy = (q.at.ty - cy) * sc;
+  const tq = P.track && P.quests[P.track] ? QBY[P.track] : null, tg = tq ? qTarget(tq) : null;
+  mmc.fillStyle = '#ffd54a'; const qx = tg ? (tg.x / T - cx) * sc : -9, qy = tg ? (tg.y / T - cy) * sc : -9;
   if (qx > 0 && qy > 0 && qx < mm.width && qy < mm.height) { mmc.font = 'bold 10px sans-serif'; mmc.textAlign = 'center'; mmc.fillText('!', qx, qy + 4); }
   mmc.fillStyle = '#ff5a4a';
   for (const e of enemies) { if (e.dead) continue; const x = (e.x / T - cx) * sc, y = (e.y / T - cy) * sc; if (x < 0 || y < 0 || x > mm.width || y > mm.height) continue; const b = ETYPES[e.type].boss; mmc.fillRect(x - 1, y - 1, b ? 4 : 2, b ? 4 : 2); }
@@ -1756,7 +1769,13 @@ function updateHud() {
   const sig = mem.map(m => m.n).join('|');
   if (mem.length) { if (hudCache.partySig !== sig) { hudCache.partySig = sig; pt.innerHTML = mem.map((m, i) => `<div class="pm"><span>${m.n}</span><div class="bar hp"><i id="pa${i}"></i></div></div>`).join(''); pt.hidden = false; for (const k in hudCache) if (/^pa\d/.test(k)) delete hudCache[k]; } mem.forEach((m, i) => setW('pa' + i, m.f)); }
   else if (!pt.hidden) { pt.hidden = true; pt.innerHTML = ''; hudCache.partySig = ''; }
-  const q = questFor(P.questIdx); setTxt('qT', q.t); setTxt('qD', q.d); setTxt('qP', q.type === 'none' || !q.n ? '' : P.qprog + ' / ' + q.n);
+  if (M.type === 'dungeon') { const dq = M.quests[0]; setTxt('qT', dq.t); setTxt('qD', dq.d); setTxt('qP', ''); }
+  else { const tq = P.track && P.quests[P.track] ? QBY[P.track] : null;
+    if (!tq) { const n = Object.keys(P.quests).length; setTxt('qT', n ? 'Завдань: ' + n : 'Немає завдань'); setTxt('qD', n ? 'Відкрий журнал 📜' : 'Шукай NPC зі знаком ❗'); setTxt('qP', ''); }
+    else { const s = P.quests[P.track]; setTxt('qT', tq.t); if (s.ready) { setTxt('qD', 'Здай: ' + qNpcName(tq.to || tq.giver, tq.toMap || tq.map) + (((tq.toMap || tq.map) !== M.id) ? ' · ' + MAPS[tq.toMap || tq.map].name : '')); setTxt('qP', '✔ готово'); }
+      else { const i = tq.obj.findIndex((o, j) => s.prog[j] < (o.n || 1)); setTxt('qD', objText(tq.obj[i], s.prog[i], tq)); setTxt('qP', ''); } } }
+  const nb = !P.dead && npcs.reduce((b, n) => { const d = Math.hypot(n.x - P.x, n.y - P.y); return d < (n.stall ? 80 : 64) && (!b || d < b.d) ? { n, d } : b; }, null);
+  const tb = $('bTalk'); if (nb) { tb.hidden = false; setTxt('bTalkN', '💬 ' + nb.n.name); tb.onclick = () => openNpc(nb.n); } else if (!tb.hidden) tb.hidden = true;
   const btns = $('skills').children;
   P.C.skills.forEach((sk, i) => {
     const b = btns[i]; if (!b) return; const cd = P.cds[i], f = cd > 0 ? cd / sk.cd : 0;
@@ -1776,6 +1795,15 @@ $('dialog').addEventListener('click', e => {
   else if (act === 'tomenu') { writeSave(); closeDialog(); toMenu(); }
   else if (act === 'inv') openInventory();
   else if (act === 'story') openStory(false);
+  else if (act === 'qview') openQuest(a.dataset.q);
+  else if (act === 'qacc') { qAccept(a.dataset.q); if (curNpc) openNpcDialog(curNpc); else closeDialog(); }
+  else if (act === 'qdec') { toast('Можливо, іншим разом'); if (curNpc) openNpcDialog(curNpc); else closeDialog(); }
+  else if (act === 'qturn') qTurnIn(a.dataset.q);
+  else if (act === 'qback') { if (curNpc && npcs.includes(curNpc)) openNpcDialog(curNpc); else closeDialog(); }
+  else if (act === 'trade') { if (curNpc) openShop(curNpc, 'buy'); }
+  else if (act === 'journal') openJournal();
+  else if (act === 'qtrack') { P.track = a.dataset.q; openJournal(); }
+  else if (act === 'qab') { const q = QBY[a.dataset.q]; if (confirm('Відмовитись від завдання «' + q.t + '»? Прогрес буде втрачено.')) { qAbandon(a.dataset.q); openJournal(); } }
   else if (act === 'shoptab') openShop(curShop, a.dataset.t);
   else if (act === 'buypot') { const pr = potPrice(); if (P.gold < pr) return toast('Не вистачає золота'); P.gold -= pr; if (a.dataset.k === 'hp') P.hpPot++; else P.mpPot++; writeSave(); openShop(curShop); }
   else if (act === 'buy') { const st = shopStock(curShop), it = st[+a.dataset.i]; if (!it) return; if (P.gold < it.price) return toast('Не вистачає золота'); if (P.bag.length >= BAG_MAX) return toast('Сумка повна'); P.gold -= it.price; st.splice(+a.dataset.i, 1); P.bag.push(it); toast('Куплено: ' + it.n); writeSave(); openShop(curShop); }
@@ -1793,7 +1821,9 @@ $('dialog').addEventListener('click', e => {
   else if (act === 'njoin') { const d = NET.invite; closeDialog(); if (d && DUNGEONS[d.parent]) { allies.length = 0; enterDungeon(d); } }
 });
 function openNpc(n) {
-  if (n.role === 'shop') return openShop(n, 'buy');
+  if (n.role === 'shop' && !n.qid) return openShop(n, 'buy');
+  if ((n.role === 'citizen' || n.role === 'guard') && !n.qid) { n.chat = n.lines ? n.lines[Math.floor(Math.random() * n.lines.length)] : 'Добрий день.'; n.chatT = 4; n.face = P.x < n.x ? -1 : 1; return; }
+  return openNpcDialog(n);
   const q = questFor(P.questIdx), f = P.faction === 'light' ? 0 : 1, lore = (LORE[M.id] || [])[f] || '';
   const qhtml = q.n ? `<div class="row"><div><b style="color:var(--gold)">${q.t}</b><br>${q.d}<br><span style="color:var(--good)">Прогрес: ${P.qprog} / ${q.n}</span><br><small style="color:var(--muted)">Нагорода: ${q.xp} досвіду, ${q.gold} 🪙</small></div></div>` : (q.type === 'none' && q.d ? `<div class="row"><div><b style="color:var(--gold)">${q.t}</b><br>${q.d}</div></div>` : '');
   const dg = DUNGEONS[M.id] ? `<p class="gl">Неподалік вхід у підземелля «${DUNGEONS[M.id].name}» — бери загін і обирай складність.</p>` : '';
@@ -1802,9 +1832,10 @@ function openNpc(n) {
 function openMenu() {
   openDialog(`<h3>Меню</h3><p>${P.name} — ${P.C.name}, ${P.lvl} рівень</p>
     <p style="color:var(--muted);font-size:13px">Прогрес зберігається автоматично в цьому браузері.</p>
-    <button class="btn" data-act="resume">Продовжити</button><button class="btn ghost" data-act="inv">🎒 Інвентар</button><button class="btn ghost" data-act="story">📜 Історія</button><button class="btn ghost" data-act="save">Зберегти</button><button class="btn ghost" data-act="tomenu">Головне меню</button>`);
+    <button class="btn" data-act="resume">Продовжити</button><button class="btn ghost" data-act="inv">🎒 Інвентар</button><button class="btn ghost" data-act="journal">📜 Журнал завдань</button><button class="btn ghost" data-act="story">📖 Історія світу</button><button class="btn ghost" data-act="save">Зберегти</button><button class="btn ghost" data-act="tomenu">Головне меню</button>`);
 }
 $('bMenu').addEventListener('click', () => { if (state === 'game') openMenu(); });
+$('bJournal').addEventListener('click', () => { if (state === 'game') openJournal(); });
 $('bNet').addEventListener('click', () => { if (state === 'game') openNet(); });
 $('bChat').addEventListener('click', () => openChat());
 function openChat() { if (state !== 'game') return; const w = $('chatbox'); w.hidden = false; const i = $('chatIn'); i.value = ''; setTimeout(() => i.focus(), 30); }
@@ -1869,6 +1900,7 @@ function startGame(d) {
   state = 'game'; show(''); $('hud').hidden = false; $('death').hidden = true; closeDialog(); buildSkillBar(); writeSave();
   toast(M.name + ' · поговори зі старійшиною ❗');
   if (fresh) openStory(true);
+  if (fresh) setTimeout(() => toast('Підійди до NPC зі знаком ❗, щоб отримати завдання'), 600);
 }
 function toMenu() { if (NET.role) NET.leave(true); allies.length = 0; if (M.type === 'dungeon') loadMap(M.parent); state = 'menu'; $('hud').hidden = true; $('death').hidden = true; refreshTitle(); show('scrTitle'); P = null; minion = null; }
 
@@ -1879,6 +1911,8 @@ function frame(now) {
   if (state === 'game' && P) {
     const paused = !$('dialog').hidden && !NET.role;
     NET.tick(dt);
+    if (!P.dead) qOnTick(dt);
+    if (!paused || NET.role) updateNpcs(dt);
     if (!paused) { updatePlayer(dt); updateMinion(dt); updateAllies(dt); updateEnemies(dt); updateProjs(dt); }
     updateFx(dt);
     updateHud(); drawMinimap();
@@ -2345,6 +2379,371 @@ function drawDEntr(o) {
   c.fillStyle = '#c9a0ff'; c.fillRect(x - 3, y - 64, 6, 6);
 }
 
+// ============ quest NPCs ============
+const L2 = (light, dark) => ({ light, dark });
+const TX = x => x && typeof x === 'object' && !Array.isArray(x) && ('light' in x || 'dark' in x) ? x[P ? P.faction : 'light'] : x;
+Object.assign(NPC_LOOKS, {
+  farmer: { skin: '#e0b08a', armor: '#8a6a3a', armor2: '#6a4a2a', trim: '#c8a060', legs: '#5a4a30', boots: '#3a2a1a', head: 'none', hair: '#c88a3a', robe: 1 },
+  corporal: { skin: '#e6b894', armor: '#9aa1b2', armor2: '#6b7285', trim: '#2f5cb5', legs: '#5b6275', boots: '#3a2c22', head: 'helm', weapon: 'sword', shield: '#2f5cb5' },
+  gravewoman: { skin: '#b8c8b0', armor: '#3a3a4a', armor2: '#2a2a36', trim: '#9fe7a8', legs: '#2a2a36', boots: '#161018', head: 'hood', robe: 1, eyes: '#9fe7a8', weapon: 'staff', orb: '#9fe7a8' },
+  bonecaptain: { skin: '#e2dccb', armor: '#5a4a45', armor2: '#3d302c', trim: '#6dff8a', legs: '#3d302c', boots: '#1d1512', head: 'skull', weapon: 'axe', bones: 1, eyes: '#6dff8a', cape: '#2a3a2a' },
+  scout: { skin: '#e6b894', armor: '#4a5a3a', armor2: '#2e3a24', trim: '#a07a3a', legs: '#3a3020', boots: '#2a1d14', head: 'hood', weapon: 'bow', eyes: '#d8e8c0', cape: '#3a4a2a' },
+  dscout: { skin: '#9fb0a0', armor: '#3a3a3a', armor2: '#222', trim: '#6dff8a', legs: '#222', boots: '#111', head: 'hood', weapon: 'bow', eyes: '#6dff8a', cape: '#1a2a1a' },
+  hermit: { skin: '#d8b090', armor: '#5a4a6a', armor2: '#3a2e48', trim: '#b080ff', legs: '#3a2e48', boots: '#2a1d14', head: 'hat', robe: 1, beard: 1, weapon: 'staff', orb: '#b080ff' },
+  druid: { skin: '#e0c0a0', armor: '#3a6a3a', armor2: '#2a4a2a', trim: '#c8e070', legs: '#2a4a2a', boots: '#3a2a1a', head: 'none', hair: '#8a5a2a', robe: 1, weapon: 'staff', orb: '#9fff7a' },
+  huntsman: { skin: '#d8a07a', armor: '#6a4a2a', armor2: '#4a3220', trim: '#9a7a3a', legs: '#4a3a2a', boots: '#2a1d14', head: 'none', hair: '#3a2a1a', beard: 1, weapon: 'bow', cape: '#5a3a1a' },
+  ghostscribe: { skin: '#cfe6ff', armor: '#7a9ac8', armor2: '#5a7aa8', trim: '#ffffff', legs: '#5a7aa8', boots: '#4a6a98', head: 'none', hair: '#e0eeff', beard: 1, robe: 1 },
+  merc: { skin: '#c89070', armor: '#4a4a4a', armor2: '#2e2e2e', trim: '#a03030', legs: '#2e2e2e', boots: '#1a1a1a', head: 'helm', weapon: 'axe', cape: '#5a1a1a' },
+  icehuntress: { skin: '#f0d0b8', armor: '#d8e4ec', armor2: '#a8b8c6', trim: '#6aa8d8', legs: '#a8b8c6', boots: '#6a5a4a', head: 'hood', weapon: 'bow', eyes: '#2a4a6a', cape: '#e8f0f6' },
+  shaman: { skin: '#b8a090', armor: '#6a5a8a', armor2: '#4a3e66', trim: '#9fe7ff', legs: '#4a3e66', boots: '#2a2030', head: 'horned', robe: 1, weapon: 'staff', orb: '#9fe7ff', eyes: '#1b1410' },
+  blacksmith: { skin: '#b07a5a', armor: '#3a3030', armor2: '#2a2020', trim: '#ff7a2a', legs: '#2a2020', boots: '#1a1010', head: 'none', hair: '#1a1010', beard: 1, weapon: 'axe' },
+  ashwitch: { skin: '#d0a0a0', armor: '#4a1a1a', armor2: '#2e1010', trim: '#ff9a3a', legs: '#2e1010', boots: '#1a0808', head: 'hat', robe: 1, weapon: 'staff', orb: '#ff7a2a' },
+  librarian: { skin: '#e6b894', armor: '#3a4a7a', armor2: '#2a3a60', trim: '#e8c170', legs: '#2a3a60', boots: '#2a1d14', head: 'none', hair: '#d8d4cc', beard: 1, robe: 1 },
+  priestess: { skin: '#f0c8a4', armor: '#f4f0e4', armor2: '#d0c8b0', trim: '#e8c170', legs: '#d0c8b0', boots: '#6a5a3a', head: 'none', hair: '#e8c060', robe: 1, weapon: 'staff', orb: '#fff6c0' },
+  archivist: { skin: '#cfc8b4', armor: '#3a3428', armor2: '#2a2418', trim: '#c9a0ff', legs: '#2a2418', boots: '#161010', head: 'skull', robe: 1, eyes: '#c9a0ff' },
+  banshee: { skin: '#c8e0d8', armor: '#4a6a62', armor2: '#2a4a42', trim: '#bfffe0', legs: '#2a4a42', boots: '#1a2a26', head: 'hood', robe: 1, eyes: '#bfffe0', weapon: 'staff', orb: '#bfffe0' },
+  bard: { skin: '#e6b894', armor: '#8a3a6a', armor2: '#5a2a4a', trim: '#e8c170', legs: '#4a3a5a', boots: '#2a1d14', head: 'hat', cape: '#e8c170' }
+});
+const QNPCS = {
+  light_start: [
+    { id: 'hanna', n: 'Фермерка Ганна', look: 'farmer', dx: -110, dy: -12, greet: 'Ох, герою! Без допомоги ми цієї осені не переживемо.' },
+    { id: 'ostap', n: 'Капрал Остап', look: 'corporal', dx: 112, dy: -12, greet: 'Орден не має зайвих мечів. Тому тут ти.' }],
+  dark_start: [
+    { id: 'sirka', n: 'Могильниця Сірка', look: 'gravewoman', dx: -110, dy: -12, greet: 'Кістки шепочуть мені, мандрівнику. Сьогодні вони неспокійні.' },
+    { id: 'grim', n: 'Кістяний сотник Грім', look: 'bonecaptain', dx: 112, dy: -12, greet: 'Хрестоносці знову близько. Мені потрібні мечі, а не молитви.' }],
+  cursed: [
+    { id: 'scout', n: L2('Розвідниця Ліна', 'Слідопит Шрам'), look: L2('scout', 'dscout'), dx: -110, dy: -12, greet: L2('Я бачила, що коїться на кладовищі. Тобі не сподобається.', 'Кладовище кличе своїх. Але не нас.') },
+    { id: 'bran', n: 'Відлюдник Бран', look: 'hermit', dx: 112, dy: -12, greet: 'Мені байдуже, живий ти чи мертвий. Важливо, чи вмієш ти збирати.' }],
+  forest: [
+    { id: 'yaryi', n: 'Мисливець Ярий', look: 'huntsman', dx: -110, dy: -12, greet: 'Вовки стали хитрими. Наче хтось ними керує.' },
+    { id: 'vesta', n: 'Друїдка Веста', look: 'druid', dx: 112, dy: -12, greet: 'Ліс стогне. Порча в\'їдається в коріння.' }],
+  ruins: [
+    { id: 'krook', n: 'Найманець Крук', look: 'merc', dx: -110, dy: -12, greet: 'Платять за голови. Мертві голови теж рахуються.' },
+    { id: 'avrelii', n: 'Привид-літописець Аврелій', look: 'ghostscribe', dx: 112, dy: -12, greet: 'Я записував хроніку короля. Тепер записую його падіння.' }],
+  ice: [
+    { id: 'snizhana', n: 'Мисливиця Сніжана', look: 'icehuntress', dx: -110, dy: -12, greet: 'Тихо. Йєті чують навіть дихання.' },
+    { id: 'kholod', n: 'Шаман Холод', look: 'shaman', dx: 112, dy: -12, greet: 'Лід пам\'ятає, що зробив Ардан. Я можу дати тобі послухати.' }],
+  volcano: [
+    { id: 'horn', n: 'Коваль-відступник Горн', look: 'blacksmith', dx: -110, dy: -12, greet: 'Колись я кував для короля. Тепер кую проти нього.' },
+    { id: 'popel', n: 'Відьма Попелиця', look: 'ashwitch', dx: 112, dy: -12, greet: 'Полум\'я говорить. Хочеш почути, що воно каже про тебе?' }],
+  light_city: [
+    { id: 'ostromyr', n: 'Бібліотекар Остромир', look: 'librarian', tx: 41, ty: 30, greet: 'Тихіше, будь ласка. У цих книгах — уся пам\'ять королівства.' },
+    { id: 'milena', n: 'Жриця Мілена', look: 'priestess', tx: 55, ty: 30, greet: 'Світло з тобою, дитя. Ти втомився — сядь біля фонтану.' },
+    { id: 'myron', n: 'Вартовий Мирон', look: 'guard', tx: 48, ty: 46, greet: 'Тримай меч у піхвах у місті, друже.' },
+    { id: 'bard', n: 'Бард Лука', look: 'bard', tx: 52, ty: 37, greet: 'Хочеш пісню про героя? Спершу стань героєм!' }],
+  dark_city: [
+    { id: 'pyl', n: 'Архіваріус Пил', look: 'archivist', tx: 41, ty: 30, greet: 'Мертві пам\'ятають більше, ніж живі. Я пам\'ятаю все.' },
+    { id: 'veya', n: 'Сестра-банші Вея', look: 'banshee', tx: 55, ty: 30, greet: 'Мій плач — це пісня. Ти просто ще не навчився слухати.' },
+    { id: 'myron', n: 'Вартовий Кістолом', look: 'dguard', tx: 48, ty: 46, greet: 'Не затримуйся біля брами, мерзляку.' },
+    { id: 'bard', n: 'Скрипаль Мара', look: 'dlady', tx: 52, ty: 37, greet: 'Моя скрипка грає тільки для мертвих. Тобі пощастило.' }]
+};
+// ============ quests ============
+const QUESTS = [
+  // --- Долина Світанку (Люди)
+  { id: 'ls1', map: 'light_start', giver: 'hanna', lvl: 1, fac: 'light', t: 'Дикі кабани',
+    story: ['Кабани вийшли з лісу й риють наші поля. Ще тиждень — і не буде що збирати.', 'Відженеш шістьох найнахабніших? Я віддячу, чим маю.'],
+    obj: [{ k: 'kill', type: 'boar', n: 6, z: 'camp' }], done: 'Хвала Світлу! Тепер у нас буде хліб на зиму. Ось, візьми.' },
+  { id: 'ls2', map: 'light_start', giver: 'hanna', lvl: 3, fac: 'light', req: ['ls1'], t: 'Вкрадене зерно',
+    story: ['Бандити на північному сході забрали наші мішки із зерном.', 'Поверни хоча б чотири мішки — без них ми не засіємо весною.'],
+    obj: [{ k: 'collect', item: 'Мішок зерна', icon: '🌾', from: ['bandit'], ch: .6, n: 4, z: 1 }], done: 'Ти справжній захисник! Діти не голодуватимуть.' },
+  { id: 'ls3', map: 'light_start', giver: 'ostap', lvl: 2, fac: 'light', t: 'Розвідка табору',
+    story: ['Бандити осіли в старих руїнах на північному сході.', 'Підберися близько й подивись, скільки їх. Не геройствуй — просто подивись.'],
+    obj: [{ k: 'explore', z: 1, r: 6, label: 'Табір бандитів' }], done: 'Більше, ніж я думав. Добре, що ти повернувся живим.' },
+  { id: 'ls4', map: 'light_start', giver: 'ostap', lvl: 4, fac: 'light', req: ['ls3'], t: 'Бандити на дорогах',
+    story: ['Тепер, коли ми знаємо, де вони, час діяти.', 'Знешкодь вісім бандитів. Дорога до столиці має бути вільною.'],
+    obj: [{ k: 'kill', type: 'bandit', n: 8, z: 1 }], done: 'Дорога вільна. Орден пам\'ятатиме твою службу.' },
+  { id: 'ls5', map: 'light_start', giver: 'elder', lvl: 6, fac: 'light', req: ['ls4'], t: 'Отаман Бурлака',
+    story: ['Ватажок бандитів, Бурлака, сховався на південному сході. Кажуть, він знайшов дивний чорний камінь і відтоді не спить.', 'Це схоже на Порчу. Зупини його, поки зараза не пішла долиною.'],
+    obj: [{ k: 'kill', type: 'banditChief', n: 1, z: 'arena', boss: 1 }], done: 'Чорний камінь... Це уламок Склепу. Порча ближче, ніж ми думали.', rw: { item: 2 } },
+  { id: 'ls6', map: 'light_start', giver: 'elder', lvl: 6, fac: 'light', req: ['ls5'], t: 'Лист до столиці', to: 'captain', toMap: 'light_city',
+    story: ['Віднеси цей уламок і мій лист капітанові варти Яремі у Світлограді.', 'Портал на півночі веде до столиці.'],
+    obj: [{ k: 'talk', npc: 'captain', map: 'light_city', label: 'Поговорити з капітаном Яремою (Світлоград)' }], done: 'Уламок Склепу? Ти зробив правильно, що приніс його сюди.' },
+  // --- Чорні Кургани (Нежить)
+  { id: 'ds1', map: 'dark_start', giver: 'sirka', lvl: 1, fac: 'dark', t: 'Трупні щури',
+    story: ['Щури гризуть кістки наших братів, що ще не прокинулись.', 'Убий шістьох. Мертві мають спати спокійно, поки не настане їхній час.'],
+    obj: [{ k: 'kill', type: 'giantRat', n: 6, z: 'camp' }], done: 'Кістки вдячні тобі. Я чую.' },
+  { id: 'ds2', map: 'dark_start', giver: 'sirka', lvl: 3, fac: 'dark', req: ['ds1'], t: 'Кістки предків',
+    story: ['Щури розтягли кістки предків по всьому кладовищу на північному заході.', 'Збери п\'ять. Я поверну їм вічний сон.'],
+    obj: [{ k: 'collect', item: 'Кістка предка', icon: '🦴', from: ['giantRat'], ch: .55, n: 5, z: 0 }], done: 'Вони знову разом. Колись і ти так спатимеш.' },
+  { id: 'ds3', map: 'dark_start', giver: 'grim', lvl: 2, fac: 'dark', t: 'Очі на сході',
+    story: ['Хрестоносці Світла стали табором у руїнах на північному сході.', 'Подивись, скільки їх. Живі вміють рахувати, а ми вміємо чекати.'],
+    obj: [{ k: 'explore', z: 1, r: 6, label: 'Табір хрестоносців' }], done: 'Ціла сотня? Ні. Але досить, щоб спалити курган.' },
+  { id: 'ds4', map: 'dark_start', giver: 'grim', lvl: 4, fac: 'dark', req: ['ds3'], t: 'Хрестоносці',
+    story: ['Вони прийшли спалити нас удруге. Покажи їм, що мертві відповідають.', 'Вісім хрестоносців — і вони подумають двічі, перш ніж повертатися.'],
+    obj: [{ k: 'kill', type: 'crusader', n: 8, z: 1 }], done: 'Добре. Їхні молитви сьогодні не допомогли.' },
+  { id: 'ds5', map: 'dark_start', giver: 'elder', lvl: 6, fac: 'dark', req: ['ds4'], t: 'Інквізитор Світла',
+    story: ['Їхній ватажок, Інквізитор, носить на шиї чорний камінь. Порча просочилася навіть у святих.', 'Знищ його й забери камінь.'],
+    obj: [{ k: 'kill', type: 'inquisitor', n: 1, z: 'arena', boss: 1 }], done: 'Уламок Склепу... Навіть Світло гниє. Цікаво.', rw: { item: 2 } },
+  { id: 'ds6', map: 'dark_start', giver: 'elder', lvl: 6, fac: 'dark', req: ['ds5'], t: 'Звіт Наглядачу', to: 'captain', toMap: 'dark_city',
+    story: ['Віднеси уламок Наглядачеві Склепів у Некрополь.', 'Портал на півночі веде до міста мертвих.'],
+    obj: [{ k: 'talk', npc: 'captain', map: 'dark_city', label: 'Поговорити з Наглядачем Склепів (Некрополь)' }], done: 'Уламок Склепу. Морвен захоче побачити це сама.' },
+  // --- Світлоград
+  { id: 'lc1', map: 'light_city', giver: 'captain', lvl: 5, fac: 'light', t: 'Обхід стін',
+    story: ['Новачкам у варті — обхід. Пройдися до південної брами й поговори з вартовим Мироном.', 'Заодно подивишся на місто.'],
+    obj: [{ k: 'talk', npc: 'myron', map: 'light_city', label: 'Поговорити з вартовим Мироном' }], to: 'myron', done: 'Капітан прислав? Тут усе спокійно. Передай, що брама стоїть.' },
+  { id: 'lc2', map: 'light_city', giver: 'ostromyr', lvl: 7, fac: 'light', t: 'Хроніка Чорної Зорі',
+    story: ['Хроніку тієї ночі розірвали, а сторінки розвіяв вітер над Проклятими Землями.', 'Скелети на кладовищі носять їх у кістяних пальцях, наче пам\'ятають. Принеси п\'ять сторінок.'],
+    obj: [{ k: 'collect', item: 'Сторінка хроніки', icon: '📜', from: ['skeleton'], ch: .5, n: 5, map: 'cursed', z: 0 }],
+    done: '«...і король сказав: смерть — це лише двері, а я маю ключ...» Він знав, що робить. Він хотів цього.' },
+  { id: 'lc3', map: 'light_city', giver: 'milena', lvl: 8, fac: 'light', t: 'Упокоєння душ',
+    story: ['Привиди на болоті Проклятих Земель — це наші загиблі брати й сестри.', 'Звільни шість душ. Світло прийме їх.'],
+    obj: [{ k: 'kill', type: 'ghost', n: 6, map: 'cursed', z: 1 }], done: 'Я відчула, як вони пішли. Дякую тобі.' },
+  { id: 'lc4', map: 'light_city', giver: 'captain', lvl: 6, fac: 'light', req: ['ls6'], t: 'До Проклятих Земель', to: 'elder', toMap: 'cursed',
+    story: ['Уламок підтверджує найгірше: Склеп прокинувся.', 'Іди до нашого табору в Проклятих Землях і передай старійшині наказ: готуватися до штурму Склепу.'],
+    obj: [{ k: 'talk', npc: 'elder', map: 'cursed', label: 'Старійшина в Проклятих Землях' }], done: 'Наказ капітана? Тоді час нарешті діяти.' },
+  // --- Некрополь
+  { id: 'dc1', map: 'dark_city', giver: 'captain', lvl: 5, fac: 'dark', t: 'Нічна варта',
+    story: ['Кожен новий мрець проходить варту. Дійди до південної брами й поговори з Кістоломом.'],
+    obj: [{ k: 'talk', npc: 'myron', map: 'dark_city', label: 'Поговорити з вартовим Кістоломом' }], to: 'myron', done: 'Наглядач послав? Тут тихо. Живі сюди не ходять.' },
+  { id: 'dc2', map: 'dark_city', giver: 'pyl', lvl: 7, fac: 'dark', t: 'Пам\'ять кісток',
+    story: ['Скелети на кладовищі Проклятих Земель — це ті, хто впав першим у ніч Чорної Зорі.', 'Їхні кістки зберігають сторінки королівської хроніки. Принеси п\'ять.'],
+    obj: [{ k: 'collect', item: 'Сторінка хроніки', icon: '📜', from: ['skeleton'], ch: .5, n: 5, map: 'cursed', z: 0 }],
+    done: '«...смерть — лише двері, а я маю ключ...» Ардан відчинив двері. Ми — ті, хто через них пройшов.' },
+  { id: 'dc3', map: 'dark_city', giver: 'veya', lvl: 8, fac: 'dark', t: 'Голоси на болоті',
+    story: ['Привиди на болоті кричать без розуму. Порча з\'їла їхню волю.', 'Звільни шістьох. Їхній плач заважає мені співати.'],
+    obj: [{ k: 'kill', type: 'ghost', n: 6, map: 'cursed', z: 1 }], done: 'Тиша... І нарешті чиста нота.' },
+  { id: 'dc4', map: 'dark_city', giver: 'captain', lvl: 6, fac: 'dark', req: ['ds6'], t: 'Воля Морвен', to: 'elder', toMap: 'cursed',
+    story: ['Морвен бачила уламок. Її наказ: знищити Склеп, поки Порча не забрала Нежить.', 'Іди до нашого табору в Проклятих Землях.'],
+    obj: [{ k: 'talk', npc: 'elder', map: 'cursed', label: 'Ватажок табору в Проклятих Землях' }], done: 'Воля Морвен — закон. Готуймося.' },
+  // --- Прокляті Землі
+  { id: 'cu1', map: 'cursed', giver: 'elder', lvl: 4, t: 'Мертві біля табору',
+    story: L2(['Зомбі щоночі підходять до табору. Це колишні селяни — Порча підняла їх без розуму.', 'Упокой вісьмох, щоб ми могли спати.'], ['Ці зомбі — не наші. У них немає волі, лише голод Порчі.', 'Знищ вісьмох. Вони ганьблять нас.']),
+    obj: [{ k: 'kill', type: 'zombie', n: 8, z: 'camp' }], done: 'Сьогодні вночі буде тихіше.' },
+  { id: 'cu2', map: 'cursed', giver: 'scout', lvl: 6, t: 'Кладовище, що не спить',
+    story: ['На північному сході є старе кладовище. Скелети там стоять у строю, наче варта.', 'Подивись, що вони охороняють, і розбий вісьмох.'],
+    obj: [{ k: 'explore', z: 0, r: 5, label: 'Старе кладовище' }, { k: 'kill', type: 'skeleton', n: 8, z: 0 }], done: 'Вони охороняють шлях до Склепу. Тепер я впевнена.' },
+  { id: 'cu3', map: 'cursed', giver: 'bran', lvl: 8, t: 'Есенція привидів',
+    story: ['Мені потрібна ектоплазма з болотних привидів на південному заході — для зілля, що відганяє Порчу.', 'П\'ять порцій. І не питай, як я її п\'ю.'],
+    obj: [{ k: 'collect', item: 'Ектоплазма', icon: '🫧', from: ['ghost'], ch: .55, n: 5, z: 1 }], done: 'Чудово... Вона ще тепла. Тримай нагороду.' },
+  { id: 'cu4', map: 'cursed', giver: 'elder', lvl: 12, req: ['cu1', 'cu2'], t: 'Страж Склепу',
+    story: ['Шлях до Склепу відкритий. Його охороняє Страж — перший лицар Ардана, що досі служить мертвому королю.', 'Здолай його. Це перший удар по серцю Порчі.'],
+    obj: [{ k: 'kill', type: 'boss', n: 1, z: 'arena', boss: 1 }], done: 'Страж упав... Але Склеп порожній. Ардана тут немає. Сліди ведуть на північ, у ліс.', rw: { item: 2 } },
+  { id: 'cu5', map: 'cursed', giver: 'elder', lvl: 10, req: ['cu4'], t: 'Сліди на північ', to: 'elder', toMap: 'forest',
+    story: ['Сліди Порчі ведуть у Зачарований Ліс через північний портал.', 'Знайди наш табір у лісі й розкажи, що сталося у Склепі.'],
+    obj: [{ k: 'talk', npc: 'elder', map: 'forest', label: 'Табір у Зачарованому Лісі' }], done: 'Склеп порожній? Тоді ось чому ліс почав гнити...' },
+  // --- Зачарований Ліс
+  { id: 'fo1', map: 'forest', giver: 'yaryi', lvl: 9, t: 'Вовча зграя',
+    story: ['Вовки на заході полюють зграєю, як солдати. Таке буває, лише коли їх веде чужа воля.', 'Убий вісьмох — і подивимось, чи зграя розпадеться.'],
+    obj: [{ k: 'kill', type: 'wolf', n: 8, z: 0 }], done: 'Зграя розбіглася. Значить, ватажок — не вовк.' },
+  { id: 'fo2', map: 'forest', giver: 'yaryi', lvl: 10, req: ['fo1'], t: 'Шкури для табору',
+    story: ['Ночі стають холодними, а табору потрібні шкури.', 'Принеси шість вовчих шкур.'],
+    obj: [{ k: 'collect', item: 'Вовча шкура', icon: '🐺', from: ['wolf'], ch: .6, n: 6, z: 0 }], done: 'Добрі шкури. Сьогодні ніхто не змерзне.' },
+  { id: 'fo3', map: 'forest', giver: 'vesta', lvl: 11, t: 'Павутиння',
+    story: ['На сході ліс обплутаний павутиною. Павуки там — діти Порчі.', 'Знищ десятьох, щоб дерева знову побачили сонце.'],
+    obj: [{ k: 'kill', type: 'spider', n: 10, z: 1 }], done: 'Я чую, як дерева зітхнули.' },
+  { id: 'fo4', map: 'forest', giver: 'vesta', lvl: 12, req: ['fo3'], t: 'Отрута Королеви',
+    story: ['Щоб зварити протиотруту від укусу Королеви, мені потрібні павучі залози.', 'Чотири залози. Обережно — вони лопаються.'],
+    obj: [{ k: 'collect', item: 'Павуча залоза', icon: '🧪', from: ['spider'], ch: .45, n: 4, z: 1 }], done: 'Протиотрута готова. Тепер ти зможеш вистояти проти Королеви.' },
+  { id: 'fo5', map: 'forest', giver: 'elder', lvl: 16, req: ['fo3'], t: 'Королева павуків',
+    story: ['Гніздо на північному сході — серце лісової Порчі. Королева чує голос Склепу.', 'Знищ її — і ліс почне зцілюватися.'],
+    obj: [{ k: 'kill', type: 'spiderQueen', n: 1, z: 'arena', boss: 1 }], done: 'У її гнізді знайшли печатку з гербом Ардана. Він проходив тут — до своєї цитаделі.', rw: { item: 2 } },
+  // --- Руїни Фортеці
+  { id: 'ru1', map: 'ruins', giver: 'krook', lvl: 13, t: 'Мертва варта',
+    story: ['Мертві лицарі на заході досі несуть варту за мертвого короля.', 'Вісім голів — і я плачу.'],
+    obj: [{ k: 'kill', type: 'deadKnight', n: 8, z: 0 }], done: 'Чесна робота. Тримай золото.' },
+  { id: 'ru2', map: 'ruins', giver: 'krook', lvl: 14, t: 'Лучники на мурах',
+    story: ['Скелети-лучники на східних мурах не дають підійти до цитаделі.', 'Збий вісьмох.'],
+    obj: [{ k: 'kill', type: 'archer', n: 8, z: 1 }], done: 'Мури чисті. Можна йти до трону.' },
+  { id: 'ru3', map: 'ruins', giver: 'avrelii', lvl: 15, t: 'Печатка короля',
+    story: ['Королівська печатка розбилася в ніч Чорної Зорі. Уламки забрали лицарі його варти.', 'Збери три уламки — і я покажу тобі останній запис хроніки.'],
+    obj: [{ k: 'collect', item: 'Уламок печатки', icon: '🔱', from: ['deadKnight'], ch: .35, n: 3, z: 0 }],
+    done: '«Король пішов у гори шукати Серце Зими — щоб заморозити смерть навіки». Ось куди він подався.' },
+  { id: 'ru4', map: 'ruins', giver: 'elder', lvl: 20, req: ['ru1', 'ru2'], t: 'Лицар-Привид',
+    story: ['Лицар-Привид охороняє тронну залу на півночі. Він пам\'ятає наказ короля і не пропускає нікого.', 'Звільни його від служби.'],
+    obj: [{ k: 'kill', type: 'ghostKnight', n: 1, z: 'arena', boss: 1 }], done: 'Перед тим як розвіятися, він прошепотів: «Король у горах... у льоду...»', rw: { item: 2 } },
+  // --- Крижані Гори
+  { id: 'ic1', map: 'ice', giver: 'snizhana', lvl: 17, t: 'Снігові звірі',
+    story: ['Йєті на заході знавіснілі — Порча дісталася й сюди.', 'Убий вісьмох, поки вони не спустилися до табору.'],
+    obj: [{ k: 'kill', type: 'yeti', n: 8, z: 0 }], done: 'Вони відступили в гори. Дякую.' },
+  { id: 'ic2', map: 'ice', giver: 'kholod', lvl: 18, t: 'Серце льоду',
+    story: ['Крижані духи на сході носять у собі уламки Серця Зими.', 'Принеси п\'ять крижаних сердець — я спробую зрозуміти, що створив Ардан.'],
+    obj: [{ k: 'collect', item: 'Крижане серце', icon: '💎', from: ['iceElem'], ch: .5, n: 5, z: 1 }], done: 'Вони холодні, але б\'ються... Ардан хотів зупинити смерть, а зупинив життя.' },
+  { id: 'ic3', map: 'ice', giver: 'snizhana', lvl: 19, req: ['ic1'], t: 'Сліди велетня',
+    story: ['На півночі я бачила сліди завбільшки з сани.', 'Піди подивись, звідки вони ведуть.'],
+    obj: [{ k: 'explore', z: 'arena', r: 9, label: 'Вершина на півночі' }], done: 'Крижаний Велетень... Значить, легенди правдиві.' },
+  { id: 'ic4', map: 'ice', giver: 'elder', lvl: 24, req: ['ic3'], t: 'Крижаний Велетень',
+    story: ['Велетень охороняє Серце Зими. Ардан розбудив його, а потім залишив.', 'Здолай його — і дізнаємось, куди пішов король.'],
+    obj: [{ k: 'kill', type: 'frostGiant', n: 1, z: 'arena', boss: 1 }], done: 'Серце Зими розбите. Ардан не заморозив смерть... і пішов у вогонь. У Вулканічну Пустку.', rw: { item: 3 } },
+  // --- Вулканічна Пустка
+  { id: 'vo1', map: 'volcano', giver: 'horn', lvl: 21, t: 'Біси в пустці',
+    story: ['Біси на заході розносять полум\'я Порчі.', 'Знищ десятьох, щоб моя кузня охолола хоч трохи.'],
+    obj: [{ k: 'kill', type: 'imp', n: 10, z: 0 }], done: 'Повітря чистішає. Добре.' },
+  { id: 'vo2', map: 'volcano', giver: 'horn', lvl: 23, req: ['vo1'], t: 'Демонічна сталь',
+    story: ['З демонічних злитків я скую зброю, що ріже полум\'я.', 'Принеси п\'ять.'],
+    obj: [{ k: 'collect', item: 'Демонічний злиток', icon: '🔥', from: ['demon'], ch: .45, n: 5, z: 1 }], done: 'Гарячі... Добра сталь. Ось твоя нагорода.', rw: { item: 3 } },
+  { id: 'vo3', map: 'volcano', giver: 'popel', lvl: 24, t: 'Шепіт полум\'я',
+    story: ['Демони на сході — це слуги Володаря Полум\'я. Він чує їхніми вухами.', 'Убий вісьмох — і він на мить осліпне.'],
+    obj: [{ k: 'kill', type: 'demon', n: 8, z: 1 }], done: 'Полум\'я замовкло. Тепер він не бачить, як ти йдеш.' },
+  { id: 'vo4', map: 'volcano', giver: 'elder', lvl: 30, req: ['vo1', 'vo3'], t: 'Кінець Чорної Зорі',
+    story: L2(['Володар Полум\'я — це король Ардан. Він став тим, чого боявся: вічним, але без душі.', 'Знищ його, і Порча згасне. За Світло!'], ['Володар Полум\'я — це Ардан, той, хто подарував нам друге життя й прокляв його.', 'Знищ його — і Нежить нарешті стане вільною.']),
+    obj: [{ k: 'kill', type: 'flameLord', n: 1, z: 'arena', boss: 1 }], done: L2('Полум\'я згасло. Небо над Ейдарією вперше за триста років стало блакитним. Ти — легенда.', 'Ардан упав. Порча більше не владна над нами. Морвен співатиме про тебе вічно.'), rw: { item: 3 } }
+];
+const QBY = Object.fromEntries(QUESTS.map(q => [q.id, q]));
+function qReward(q) {
+  const need = xpNeed(Math.max(1, q.lvl));
+  let f = 0; for (const o of q.obj) f += o.k === 'kill' ? (o.boss ? 1.4 : .75) : o.k === 'collect' ? .85 : .35;
+  f = Math.max(.35, f);
+  return { xp: (q.rw && q.rw.xp) || Math.round(need * f), gold: (q.rw && q.rw.gold) || Math.round((10 + q.lvl * 7) * (1 + f * 2)), item: q.rw && q.rw.item };
+}
+function qState(id) { return P.quests[id]; }
+function qDone(id) { return P.qdone.includes(id); }
+function qAvailable(q) {
+  if (q.fac && q.fac !== P.faction) return false;
+  if (P.quests[q.id] || qDone(q.id)) return false;
+  return (q.req || []).every(qDone);
+}
+function npcIs(n, id, map) { return n.qid === id && M.id === map; }
+function qAccept(id) {
+  const q = QBY[id]; P.quests[id] = { prog: q.obj.map(() => 0) }; if (!P.track || !P.quests[P.track]) P.track = id;
+  toast('Нове завдання: ' + q.t); qCheck(id); writeSave();
+}
+function qAbandon(id) { delete P.quests[id]; if (P.track === id) P.track = Object.keys(P.quests)[0] || null; writeSave(); }
+function qComplete(id) { const s = P.quests[id]; if (!s) return false; return QBY[id].obj.every((o, i) => s.prog[i] >= (o.n || 1)); }
+function qCheck(id) {
+  const s = P.quests[id]; if (!s || s.ready) return;
+  if (qComplete(id)) { s.ready = 1; const q = QBY[id], to = q.to || q.giver, tm = q.toMap || q.map; toast('✔ ' + q.t + ' — повертайся до ' + qNpcName(to, tm)); ring(P.x, P.y - 10, 50, '232,193,112', .6); }
+}
+function qNpcName(id, map) {
+  if (id === 'elder') return MAPS[map] && MAPS[map].type === 'city' ? '' : FACTION[P.faction].elder;
+  if (id === 'captain') return MAPS[map].elder.name;
+  const d = (QNPCS[map] || []).find(n => n.id === id); return d ? TX(d.n) : id;
+}
+function qProgress(fn) { for (const id in P.quests) { const q = QBY[id], s = P.quests[id]; if (!q || s.ready) continue; let ch = false; q.obj.forEach((o, i) => { if (s.prog[i] < (o.n || 1) && fn(o, i, q)) { s.prog[i]++; ch = true; } }); if (ch) qCheck(id); } }
+function qOnKill(e) {
+  qProgress((o, i, q) => {
+    if ((o.map || q.map) !== M.id) return false;
+    if (o.k === 'kill' && o.type === e.type) return true;
+    if (o.k === 'collect' && o.from.includes(e.type) && Math.random() < o.ch) { floatTxt(e.x, e.y - 72, o.icon + ' ' + o.item, '#ffe7b0', 11); return true; }
+    return false;
+  });
+}
+function qOnTalk(n) {
+  let any = false;
+  qProgress((o, i, q) => { if (o.k === 'talk' && o.npc === n.qid && o.map === M.id) { any = true; return true; } return false; });
+  return any;
+}
+let qExploreT = 0;
+function qOnTick(dt) {
+  qExploreT -= dt; if (qExploreT > 0) return; qExploreT = .5;
+  qProgress((o, i, q) => { if (o.k !== 'explore' || (o.map || q.map) !== M.id) return false; const z = zoneAt(o.z); return z && Math.hypot(P.x - tc(z.tx), P.y - tc(z.ty)) < (o.r || 6) * T; });
+}
+function qTarget(q) {
+  // where to point the arrow for the first unfinished objective
+  const s = P.quests[q.id];
+  if (s.ready) { const tm = q.toMap || q.map; if (tm !== M.id) return null; const n = npcs.find(n => n.qid === (q.to || q.giver)); return n ? { x: n.x, y: n.y } : null; }
+  const i = q.obj.findIndex((o, j) => s.prog[j] < (o.n || 1)), o = q.obj[i];
+  if (!o) return null;
+  if (o.k === 'talk') { if (o.map !== M.id) return null; const n = npcs.find(n => n.qid === o.npc); return n ? { x: n.x, y: n.y } : null; }
+  if ((o.map || q.map) !== M.id) return null;
+  const z = zoneAt(o.z); return z ? { x: tc(z.tx), y: tc(z.ty) } : null;
+}
+function objText(o, p, q) {
+  const n = o.n || 1, where = (o.map || q.map) !== q.map || (o.map && o.map !== M.id) ? ' · ' + MAPS[o.map || q.map].name : '';
+  if (o.k === 'kill') return (o.boss ? 'Здолати: ' : 'Убити: ') + ETYPES[o.type].name + ` ${Math.min(p, n)}/${n}` + where;
+  if (o.k === 'collect') return o.icon + ' ' + o.item + ` ${Math.min(p, n)}/${n}` + where;
+  if (o.k === 'explore') return '🧭 Дослідити: ' + o.label + (p >= 1 ? ' ✔' : '') + where;
+  if (o.k === 'talk') return '💬 ' + o.label + (p >= 1 ? ' ✔' : '');
+  return '';
+}
+function npcMark(n) {
+  if (!n.qid) return null;
+  for (const id in P.quests) { const q = QBY[id], s = P.quests[id]; if (s.ready && (q.to || q.giver) === n.qid && (q.toMap || q.map) === M.id) return { t: '❓', c: '#ffd54a' }; }
+  for (const id in P.quests) { const q = QBY[id], s = P.quests[id]; if (!s.ready && q.obj.some((o, i) => o.k === 'talk' && o.npc === n.qid && o.map === M.id && s.prog[i] < 1)) return { t: '❓', c: '#ffd54a' }; }
+  if (QUESTS.some(q => q.map === M.id && q.giver === n.qid && qAvailable(q))) return { t: '❗', c: '#ffd54a' };
+  for (const id in P.quests) { const q = QBY[id]; if ((q.to || q.giver) === n.qid && (q.toMap || q.map) === M.id) return { t: '❓', c: '#9a9aa8' }; }
+  return null;
+}
+// ---- dialogs ----
+function openNpcDialog(n) {
+  const talked = qOnTalk(n);
+  const f = P.faction === 'light' ? 0 : 1;
+  const lore = n.role === 'elder' && !n.qid2 ? (LORE[M.id] || [])[f] : '';
+  const greet = n.greet || lore || 'Слухаю тебе.';
+  const ready = Object.keys(P.quests).filter(id => { const q = QBY[id]; return P.quests[id].ready && (q.to || q.giver) === n.qid && (q.toMap || q.map) === M.id; });
+  const avail = QUESTS.filter(q => q.map === M.id && q.giver === n.qid && qAvailable(q));
+  const active = Object.keys(P.quests).filter(id => { const q = QBY[id]; return !P.quests[id].ready && q.giver === n.qid && q.map === M.id; });
+  let rows = '';
+  for (const id of ready) rows += `<button class="qrow" data-act="qview" data-q="${id}"><span class="qm" style="color:#ffd54a">❓</span><b>${QBY[id].t}</b><small>готово — здати</small></button>`;
+  for (const q of avail) rows += `<button class="qrow" data-act="qview" data-q="${q.id}"><span class="qm" style="color:#ffd54a">❗</span><b>${q.t}</b><small>рів. ${q.lvl}${q.lvl > P.lvl + 2 ? ' · важко' : ''}</small></button>`;
+  for (const id of active) rows += `<button class="qrow" data-act="qview" data-q="${id}"><span class="qm" style="color:#9a9aa8">❓</span><b>${QBY[id].t}</b><small>виконується</small></button>`;
+  const shop = n.role === 'shop' || n.kinds ? `<button class="btn" data-act="trade">🪙 Торгувати</button>` : '';
+  const dg = n.role === 'elder' && DUNGEONS[M.id] ? `<p class="gl">Неподалік вхід у підземелля «${DUNGEONS[M.id].name}».</p>` : '';
+  openDialog(`<h3>${n.name}</h3><p><i>«${TX(greet)}»</i></p>${talked ? '<p class="gl">✔ Ти передав повідомлення.</p>' : ''}${rows ? '<div class="qlist">' + rows + '</div>' : (shop ? '' : '<p class="gl">Завдань для тебе зараз немає.</p>')}${dg}${shop}
+    <button class="btn ghost" data-act="close">Прощавай</button>`, 'wide');
+  curNpc = n;
+}
+let curNpc = null;
+function openQuest(id) {
+  const q = QBY[id], s = P.quests[id], rw = qReward(q);
+  const rwHtml = `<div class="rw">Нагорода: ✨ ${rw.xp} досвіду · 🪙 ${rw.gold}${rw.item ? ' · 🎁 ' + RAR[rw.item].n.toLowerCase() + ' предмет' : ''}</div>`;
+  const objs = q.obj.map((o, i) => `<li>${objText(o, s ? s.prog[i] : 0, q)}</li>`).join('');
+  let body, btns;
+  if (s && s.ready) { body = `<p>${TX(q.done)}</p>`; btns = `<button class="btn" data-act="qturn" data-q="${id}">Здати завдання</button>`; }
+  else if (s) { body = TX(q.story).map(p => `<p>${p}</p>`).join('') + `<ul class="objs">${objs}</ul><p class="gl">Повертайся, коли виконаєш.</p>`; btns = `<button class="btn ghost" data-act="qback">Назад</button>`; }
+  else { body = TX(q.story).map(p => `<p>${p}</p>`).join('') + `<div class="lbl">Завдання</div><ul class="objs">${objs}</ul>`; btns = `<button class="btn" data-act="qacc" data-q="${id}">Прийняти</button><button class="btn ghost" data-act="qdec">Відмовитись</button>`; }
+  openDialog(`<h3>${q.t}</h3><p class="gl">${curNpc ? curNpc.name + ' · ' : ''}рекомендований рівень ${q.lvl}</p>${body}${s && s.ready ? '' : rwHtml}${s && s.ready ? rwHtml : ''}${btns}`, 'wide');
+}
+function qTurnIn(id) {
+  const q = QBY[id], rw = qReward(q);
+  delete P.quests[id]; P.qdone.push(id); if (P.track === id) P.track = Object.keys(P.quests)[0] || null;
+  P.gold += rw.gold; gainXp(rw.xp);
+  let itemTxt = '';
+  if (rw.item) { const it = makeItem(SLOTS[rndi(0, 4)], Math.max(q.lvl, P.lvl), rw.item); if (addItem(it, true)) itemTxt = `<p>🎁 <b style="color:${RAR[it.rar].c}">${it.icon} ${it.n}</b></p>`; }
+  burst(P.x, P.y - 16, '#ffe08a', 30, 90, 1, 3, -40);
+  writeSave();
+  openDialog(`<h3>✔ ${q.t}</h3><p>${TX(q.done)}</p><p class="rw">+${rw.xp} досвіду · +${rw.gold} 🪙</p>${itemTxt}<button class="btn" data-act="qback">Далі</button>`, 'wide');
+}
+function openJournal() {
+  const ids = Object.keys(P.quests);
+  const rows = ids.map(id => { const q = QBY[id], s = P.quests[id]; return `<div class="jq ${P.track === id ? 'tr' : ''}"><div class="jt"><b>${q.t}</b><small>${MAPS[q.map].name}${s.ready ? ' · <span style="color:var(--good)">готово до здачі: ' + qNpcName(q.to || q.giver, q.toMap || q.map) + '</span>' : ''}</small></div>
+    <ul class="objs">${q.obj.map((o, i) => `<li>${objText(o, s.prog[i], q)}</li>`).join('')}</ul>
+    <div class="acts"><button class="sbtn" data-act="qtrack" data-q="${id}">${P.track === id ? '📍 Відстежується' : 'Відстежувати'}</button><button class="sbtn dang" data-act="qab" data-q="${id}">Відмовитись</button></div></div>`; }).join('');
+  openDialog(`<h3>📜 Журнал завдань</h3>${rows || '<p class="gl">Активних завдань немає. Шукай NPC зі знаком ❗.</p>'}<p class="gl">Виконано завдань: ${P.qdone.length} з ${QUESTS.filter(q => !q.fac || q.fac === P.faction).length}</p><button class="btn ghost" data-act="close">Закрити</button>`, 'wide');
+}
+
+// ============ living NPCs ============
+const CITIZEN_LINES = {
+  light: ['Кажуть, у Проклятих Землях знову бачили світло в Склепі...', 'Свіжий хліб! Хто купить свіжий хліб?', 'Мій брат пішов в Орден і не повернувся.', 'Слава героям Світанку!', 'Ціни на сталь знову зросли.', 'Не ходи вночі за браму.', 'Бачив новачка в Ордені? Кажуть, дуже здібний.', 'Ох, ці мерці... Хоч би до нас не дійшли.'],
+  dark: ['Живі знову пішли в курган... дурні.', 'Продам кістку. Майже нова.', 'Я пам\'ятаю, як мене поховали. Було тісно.', 'Морвен бачить усе.', 'Тиша — найкраща музика.', 'Порча... Навіть ми її боїмося.', 'Ще одна ніч, ще один вічний день.', 'Хто вкрав мій череп? А, ось він.']
+};
+function citizenLook(fac, r) {
+  const pick = a => a[Math.floor(r() * a.length)];
+  if (fac === 'light') return { skin: pick(['#f0c8a4', '#e6b894', '#d8a07a', '#c89070']), armor: pick(['#7a3b2a', '#3a5a8a', '#5a7a3a', '#8a6a3a', '#6a3a6a', '#a07a4a']), armor2: '#3a2a1a', trim: pick(['#e8c170', '#c8c8c8', '#a03030']), legs: pick(['#4a3a2a', '#3a3a4a']), boots: '#2a1d14', head: r() < .7 ? 'none' : 'hat', hair: pick(['#3a2010', '#8a5a2a', '#d8a040', '#1a1a1a', '#d8d4cc']), robe: r() < .5 ? 1 : 0, beard: r() < .3 ? 1 : 0 };
+  return { skin: pick(['#9fb59a', '#b8c8c0', '#cfc8b4', '#8a9a88']), armor: pick(['#2e2640', '#3a3a3a', '#2a4a3a', '#4a2a2a', '#3d3a33']), armor2: '#1a1620', trim: pick(['#6dff8a', '#c9a0ff', '#8a7a5a']), legs: '#222', boots: '#111', head: r() < .3 ? 'skull' : r() < .6 ? 'hood' : 'none', hair: '#2a2a20', robe: r() < .6 ? 1 : 0, eyes: pick(['#6dff8a', '#e0e070', '#c9a0ff']), bones: r() < .2 ? 1 : 0 };
+}
+function makeLivingNpcs() {
+  const out = [], r = mulberry32((M.seed || 1) + 77), C = CAMP;
+  const spot = (cx, cy, rad) => { for (let k = 0; k < 40; k++) { const a = r() * 6.28, d = r() * rad, x = tc(cx) + Math.cos(a) * d * T, y = tc(cy) + Math.sin(a) * d * T; if (canStand(x, y, 8)) return { x, y }; } return { x: tc(cx), y: tc(cy) + 60 }; };
+  if (M.type === 'city') {
+    const fac = M.fac, names = fac === 'light' ? ['Містянин', 'Містянка', 'Пекар', 'Ремісник', 'Прачка', 'Хлопчик', 'Старий', 'Торговка'] : ['Мрець', 'Повстала', 'Кістяр', 'Тінь', 'Плакальниця', 'Гробар', 'Старий кістяк', 'Блукач'];
+    for (let i = 0; i < 12; i++) { const p = spot(C.tx, C.ty, 15); out.push({ kind: 'npc', role: 'citizen', name: names[i % names.length], x: p.x, y: p.y, hx: p.x, hy: p.y, face: 1, look: citizenLook(fac, r), wander: 6 * T, spd: 26 + r() * 14, lines: CITIZEN_LINES[fac], talkT: 3 + r() * 10, walk: 0 }); }
+    const gl = NPC_LOOKS[fac === 'light' ? 'guard' : 'dguard'], gn = fac === 'light' ? 'Вартовий' : 'Мертвий вартовий';
+    const routes = [[[C.tx - 14, C.ty - 14], [C.tx + 14, C.ty - 14], [C.tx + 14, C.ty + 14], [C.tx - 14, C.ty + 14]], [[C.tx, C.ty - 20], [C.tx, C.ty + 24]], [[C.tx - 30, C.ty], [C.tx + 36, C.ty]]];
+    for (const rt of routes) { const pts = rt.map(([x, y]) => ({ x: tc(clamp(x, 3, MW - 4)), y: tc(clamp(y, 3, MH - 4)) })); out.push({ kind: 'npc', role: 'guard', name: gn, x: pts[0].x, y: pts[0].y, face: 1, look: gl, route: pts, ri: 1, spd: 34, walk: 0, lines: [fac === 'light' ? 'Порядок у місті!' : 'Тихо тут.'], talkT: 15 + r() * 20 }); }
+  } else if (!M.type) {
+    const lk = P.faction === 'light' ? NPC_LOOKS.corporal : NPC_LOOKS.bonecaptain;
+    for (let i = 0; i < 2; i++) { const p = spot(C.tx, C.ty, 4); out.push({ kind: 'npc', role: 'guard', name: P.faction === 'light' ? 'Солдат Ордену' : 'Кістяний воїн', x: p.x, y: p.y, hx: p.x, hy: p.y, face: 1, look: lk, wander: 3 * T, spd: 28, walk: 0, lines: P.faction === 'light' ? ['Тримаємо табір!', 'Ще одна ніч...'] : ['Вічна варта.', 'Живі близько...'], talkT: 8 + r() * 12 }); }
+  }
+  return out;
+}
+function updateNpcs(dt) {
+  for (const n of npcs) {
+    if (n.chatT > 0) n.chatT -= dt;
+    if (n.lines) { n.talkT -= dt; if (n.talkT <= 0) { n.talkT = 10 + Math.random() * 14; if (P && dist(n, P) < 360) { n.chat = n.lines[Math.floor(Math.random() * n.lines.length)]; n.chatT = 4; } } }
+    if (curNpc === n && !$('dialog').hidden) { n.moving = false; continue; }
+    let moved = 0;
+    if (n.route) {
+      const t = n.route[n.ri]; moved = moveTowards(n, t.x, t.y, n.spd, dt);
+      if (Math.hypot(t.x - n.x, t.y - n.y) < 6 || moved < .01) n.ri = (n.ri + 1) % n.route.length;
+    } else if (n.wander) {
+      if (n.wait > 0) n.wait -= dt;
+      else if (!n.tgt) { const a = Math.random() * 6.28, d = Math.random() * n.wander, x = n.hx + Math.cos(a) * d, y = n.hy + Math.sin(a) * d; if (canStand(x, y, 7)) n.tgt = { x, y }; }
+      else { moved = moveTowards(n, n.tgt.x, n.tgt.y, n.spd, dt); if (Math.hypot(n.tgt.x - n.x, n.tgt.y - n.y) < 5 || moved < .01) { n.tgt = null; n.wait = 1 + Math.random() * 4; } }
+    }
+    n.moving = moved > .05; n.walk = (n.walk || 0) + dt * (n.moving ? 9 : 2);
+  }
+}
+
 // ============ online group (PeerJS, leader = host) ============
 const NET = {
   role: null, peer: null, conns: new Map(), hostConn: null, hostId: null, code: '', peers: new Map(), myId: '',
@@ -2551,5 +2950,5 @@ function openNet() {
 // ============ boot ============
 resize(); buildSprites(); buildSprites2(); buildSprites3(); loadMap('cursed'); refreshTitle();
 requestAnimationFrame(frame);
-window.__game = { NET, get P() { return P; }, allies, dentrs, objs, enterDungeon, exitDungeon, openInventory, makeItem, addItem, recalc, get dsel() { return dsel; }, get M() { return M; }, portals, changeMap, enemies, useSkill, worldTap, get state() { return state; } };
+window.__game = { NET, QUESTS, QBY, get npcs() { return npcs; }, openNpc, qAccept, qTurnIn, openJournal, get P() { return P; }, allies, dentrs, objs, enterDungeon, exitDungeon, openInventory, makeItem, addItem, recalc, get dsel() { return dsel; }, get M() { return M; }, portals, changeMap, enemies, useSkill, worldTap, get state() { return state; } };
 })();
