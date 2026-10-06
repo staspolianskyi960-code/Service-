@@ -750,8 +750,32 @@ for (const k of ['mage', 'paladin', 'necro', 'warrior', 'hunter', 'dk']) {
   HERO[k] = {};
   for (const v of ['front', 'side', 'back', 'portrait']) { const im = new Image(); im.src = 'assets/heroes/' + k + '_' + v + '.png'; HERO[k][v] = im; }
 }
-const heroReady = k => HERO[k] && HERO[k].front.complete && HERO[k].front.naturalWidth && HERO[k].side.complete && HERO[k].back.complete;
+const heroReady = k => (SHEET[k] && SHEET[k].img.complete && SHEET[k].img.naturalWidth > 0) || HERO[k] && HERO[k].front.complete && HERO[k].front.naturalWidth && HERO[k].side.complete && HERO[k].back.complete;
+// animated sprite sheets cut from the atlas: rows idle, walk, run, attack, hurt, death (frames face right)
+const SHEET = {"mage":{"cw":54,"ch":55,"h":41,"rows":{"idle":6,"walk":6,"run":5,"attack":8,"hurt":6,"death":3}},"paladin":{"cw":49,"ch":54,"h":41,"rows":{"idle":6,"walk":6,"run":5,"attack":5,"hurt":4,"death":3}},"necro":{"cw":62,"ch":55,"h":47,"rows":{"idle":5,"walk":4,"run":5,"attack":7,"hurt":5,"death":2}},"warrior":{"cw":57,"ch":54,"h":40,"rows":{"idle":5,"walk":5,"run":4,"attack":5,"hurt":4,"death":5}},"hunter":{"cw":71,"ch":56,"h":37,"rows":{"idle":5,"walk":5,"run":5,"attack":7,"hurt":4,"death":4}},"dk":{"cw":53,"ch":53,"h":44,"rows":{"idle":5,"walk":5,"run":5,"attack":4,"hurt":4,"death":2}}}, SHEET_ROWS = ['idle', 'walk', 'run', 'attack', 'hurt', 'death'];
+for (const k in SHEET) { const im = new Image(); im.src = 'assets/heroes/' + k + '_sheet.png'; SHEET[k].img = im; }
+function drawHeroAnim(c, x, y, cls, o) {
+  const S = SHEET[cls], im = S.img, R = S.rows;
+  const atk = o.atk != null && o.atk >= 0 && o.atk < 1 ? o.atk : -1;
+  let anim, f;
+  if (o.deadT != null) { anim = 'death'; f = Math.min(R.death - 1, Math.floor(o.deadT * 6)); }
+  else if (atk >= 0) { anim = 'attack'; f = Math.min(R.attack - 1, Math.floor(atk * R.attack)); }
+  else if (o.hurt > 0) { anim = 'hurt'; f = Math.min(R.hurt - 1, Math.floor((1 - o.hurt / .35) * R.hurt)); }
+  else if (o.moving) { anim = o.run ? 'run' : 'walk'; f = Math.floor((o.walk || 0) / 11 * 9) % R[anim]; }
+  else { anim = 'idle'; f = Math.floor(time * 5 + (o.seed || 0)) % R.idle; }
+  const row = SHEET_ROWS.indexOf(anim), s = 52 / S.h * (o.scale || 1), face = o.face || 1;
+  c.save(); c.translate(x, y);
+  if (o.alpha != null) c.globalAlpha = o.alpha;
+  const gl = c.createRadialGradient(0, -24, 2, 0, -24, 30); gl.addColorStop(0, o.glow || 'rgba(255,240,200,.14)'); gl.addColorStop(1, 'rgba(255,240,200,0)'); c.fillStyle = gl; c.fillRect(-30, -56, 60, 60);
+  c.fillStyle = 'rgba(0,0,0,.35)'; ell(c, 0, 0, 11, 4);
+  c.scale(face * s, s);
+  c.imageSmoothingEnabled = true;
+  c.drawImage(im, f * S.cw, row * S.ch, S.cw, S.ch, -S.cw / 2, -(S.ch - 2), S.cw, S.ch);
+  c.restore();
+}
+const sheetReady = k => SHEET[k] && SHEET[k].img.complete && SHEET[k].img.naturalWidth > 0;
 function drawHero(c, x, y, cls, o) {
+  if (sheetReady(cls)) return drawHeroAnim(c, x, y, cls, o);
   const H = HERO[cls], view = o.back ? 'back' : o.side ? 'side' : 'front', im = H[view];
   const s = 54 / H.front.naturalHeight * (o.scale || 1);
   const w = im.naturalWidth * s, h = im.naturalHeight * s;
@@ -1171,13 +1195,13 @@ function hitPlayer(amt, src) {
   let d = amt * rnd(.9, 1.1) * (1 - P.armor);
   if (P.buffs.shield > 0) d *= .4;
   d = Math.max(1, Math.round(d));
-  P.hp -= d; P.flash = .12; P.combatT = 0;
+  P.hp -= d; P.flash = .12; P.combatT = 0; P.hurtT = .35;
   floatTxt(P.x, P.y - 36, '-' + d, '#ff6a5a', 14);
-  if (P.hp <= 0) { P.hp = 0; P.dead = true; P.path = null; P.target = null; P.autoAtk = false; P.pending = -1; $('death').hidden = false; burst(P.x, P.y - 14, '#aa2222', 30, 80, 1, 3, 100); }
+  if (P.hp <= 0) { P.hp = 0; P.dead = true; P.deadAt = time; P.path = null; P.target = null; P.autoAtk = false; P.pending = -1; $('death').hidden = false; burst(P.x, P.y - 14, '#aa2222', 30, 80, 1, 3, 100); }
 }
 function reviveP() {
   const lost = Math.floor(P.gold * .1); P.gold -= lost;
-  P.dead = false; P.hp = Math.round(P.maxHp * .6); P.mp = Math.round(P.maxMp * .6); P.x = tc(CAMP.tx); P.y = tc(CAMP.ty) + 70; P.buffs = {}; P.stun = 0; P.dash = null;
+  P.dead = false; P.deadAt = 0; P.hp = Math.round(P.maxHp * .6); P.mp = Math.round(P.maxMp * .6); P.x = tc(CAMP.tx); P.y = tc(CAMP.ty) + 70; P.buffs = {}; P.stun = 0; P.dash = null;
   for (const e of enemies) if (e.aggro === P) { e.state = 'return'; e.aggro = null; }
   for (const a of allies) if (a.dead) { a.dead = false; a.hp = Math.round(a.maxHp * .5); a.x = P.x; a.y = P.y; }
   $('death').hidden = true; writeSave();
@@ -1333,7 +1357,7 @@ function updatePlayer(dt) {
   for (let i = 0; i < 4; i++) p.cds[i] = Math.max(0, p.cds[i] - dt);
   for (const k in p.buffs) p.buffs[k] = Math.max(0, p.buffs[k] - dt);
   p.potCd = Math.max(0, (p.potCd || 0) - dt); p.flash = Math.max(0, p.flash - dt);
-  if (p.atkAnim >= 0) { p.atkAnim += dt * 3.5; if (p.atkAnim >= 1) p.atkAnim = -1; }
+  if (p.atkAnim >= 0) { p.atkAnim += dt * 2.7; if (p.atkAnim >= 1) p.atkAnim = -1; }
   if (p.dead) return;
   p.combatT += dt;
   // regen
@@ -1530,7 +1554,7 @@ function render() {
   const m = 80;
   for (const o of objs) if (o.x > camX - m && o.x < camX + vw + m && o.y > camY - 20 && o.y < camY + vh + 90) list.push(o);
   for (const e of enemies) if (!e.dead && e.x > camX - m && e.x < camX + vw + m && e.y > camY - 20 && e.y < camY + vh + 90) list.push(e);
-  if (state !== 'menu') { for (const n of npcs) list.push(n); if (minion) list.push(minion); for (const a of allies) if (!a.dead) list.push(a); if (NET.role) for (const rp of NET.remotesHere()) if (!rp.dead) list.push(rp); if (P && !P.dead) list.push(P); }
+  if (state !== 'menu') { for (const n of npcs) list.push(n); if (minion) list.push(minion); for (const a of allies) if (!a.dead) list.push(a); if (NET.role) for (const rp of NET.remotesHere()) list.push(rp); if (P) list.push(P); }
   list.sort((a, b) => a.y - b.y);
   for (const it of list) drawThing(it);
   // projectiles
@@ -1557,10 +1581,10 @@ function render() {
     for (const n of npcs) { ctx.fillStyle = '#000'; ctx.fillText(n.name, n.x + .7, n.y - 44.3); ctx.fillStyle = '#ffd97a'; ctx.fillText(n.name, n.x, n.y - 45); ctx.font = 'bold 13px sans-serif'; ctx.fillText(n.role === 'elder' ? '❗' : (SHOP_ICON[n.kinds[0]] || '🪙'), n.x, n.y - 56 + Math.sin(time * 3) * 2); ctx.font = 'bold 9px Philosopher, serif'; }
     for (const o of dentrs) { const t1 = '⚔ ' + (DUNGEONS[M.id] ? DUNGEONS[M.id].name : 'Підземелля'), t2 = 'підземелля · рів. ' + (DUNGEONS[M.id] ? DUNGEONS[M.id].lvl : '') + '+'; ctx.fillStyle = '#000'; ctx.fillText(t1, o.x + .7, o.y - 80.3); ctx.fillStyle = '#c9a0ff'; ctx.fillText(t1, o.x, o.y - 81); ctx.fillStyle = '#000'; ctx.fillText(t2, o.x + .7, o.y - 70.3); ctx.fillStyle = '#ffe7b0'; ctx.fillText(t2, o.x, o.y - 71); }
     for (const a of allies) { if (a.dead) continue; ctx.fillStyle = '#000'; ctx.fillText(a.name, a.x + .7, a.y - 46.3); ctx.fillStyle = '#9fe0ff'; ctx.fillText(a.name, a.x, a.y - 47); ctx.fillStyle = '#000'; ctx.fillRect(a.x - 13, a.y - 44, 26, 4); ctx.fillStyle = '#3ac060'; ctx.fillRect(a.x - 12, a.y - 43, 24 * a.hp / a.maxHp, 2); }
-    if (NET.role) for (const rp of NET.remotesHere()) { if (rp.dead) continue; ctx.fillStyle = '#000'; ctx.fillText(rp.n + ' · ' + rp.l, rp.x + .7, rp.y - 58.3); ctx.fillStyle = rp.f === 'light' ? '#9fc3ff' : '#9fe7a8'; ctx.fillText(rp.n + ' · ' + rp.l, rp.x, rp.y - 59); ctx.fillStyle = '#000'; ctx.fillRect(rp.x - 14, rp.y - 56, 28, 4); ctx.fillStyle = '#3ac060'; ctx.fillRect(rp.x - 13, rp.y - 55, 26 * clamp(rp.hp / rp.maxHp, 0, 1), 2); }
+    if (NET.role) for (const rp of NET.remotesHere()) { if (rp.dead) continue; ctx.fillStyle = '#000'; ctx.fillText(rp.n + ' · ' + rp.l, rp.x + .7, rp.y - 64.3); ctx.fillStyle = rp.f === 'light' ? '#9fc3ff' : '#9fe7a8'; ctx.fillText(rp.n + ' · ' + rp.l, rp.x, rp.y - 65); ctx.fillStyle = '#000'; ctx.fillRect(rp.x - 14, rp.y - 61, 28, 4); ctx.fillStyle = '#3ac060'; ctx.fillRect(rp.x - 13, rp.y - 60, 26 * clamp(rp.hp / rp.maxHp, 0, 1), 2); }
     const bubble = (who) => { if (!(who.chatT > 0) || !who.chat) return; ctx.font = '9px Philosopher, serif'; const tw = Math.min(150, ctx.measureText(who.chat).width + 10), bx = who.x - tw / 2, by = who.y - 84; ctx.globalAlpha = Math.min(1, who.chatT); ctx.fillStyle = 'rgba(20,14,30,.88)'; rr(ctx, bx, by, tw, 15, 5); ctx.fill(); ctx.strokeStyle = 'rgba(232,193,112,.6)'; ctx.lineWidth = 1; ctx.stroke(); ctx.fillStyle = '#efe6d6'; ctx.fillText(who.chat.length > 28 ? who.chat.slice(0, 27) + '…' : who.chat, who.x, by + 11); ctx.globalAlpha = 1; ctx.font = 'bold 9px Philosopher, serif'; };
     if (P) { if (P.chatT > 0) P.chatT -= 1 / 60; bubble(P); } if (NET.role) for (const rp of NET.remotesHere()) bubble(rp);
-    if (P && !P.dead) { ctx.fillStyle = '#000'; ctx.fillText(P.name, P.x + .7, P.y - 44.3); ctx.fillStyle = P.faction === 'light' ? '#9fc3ff' : '#9fe7a8'; ctx.fillText(P.name, P.x, P.y - 45); }
+    if (P && !P.dead) { ctx.fillStyle = '#000'; ctx.fillText(P.name, P.x + .7, P.y - 59.3); ctx.fillStyle = P.faction === 'light' ? '#9fc3ff' : '#9fe7a8'; ctx.fillText(P.name, P.x, P.y - 60); }
     // quest arrow
     if (P && !P.dead && M.type !== 'city') {
       const q = questFor(P.questIdx), qx = tc(q.at.tx), qy = tc(q.at.ty), d = Math.hypot(qx - P.x, qy - P.y);
@@ -1599,7 +1623,9 @@ function drawThing(it) {
     const b = it.buffs;
     if (b.shield > 0) { c.fillStyle = 'rgba(255,230,150,' + (.18 + Math.sin(time * 6) * .05) + ')'; ell(c, it.x, it.y - 16, 18, 22); }
     if (b.rage > 0) { c.fillStyle = 'rgba(255,50,40,.18)'; ell(c, it.x, it.y - 14, 16, 20); if (Math.random() < .3) parts.push({ x: it.x + rnd(-8, 8), y: it.y - rnd(0, 30), vx: 0, vy: -30, life: .5, max: .5, col: '#ff4030', size: 2, grav: 0 }); }
-    if (heroReady(it.clsId)) drawHero(c, it.x, it.y, it.clsId, { face: it.face, back: it.back, side: it.vside, walk: it.walk, moving: it.moving, atk: it.atkAnim, alpha: it.flash > 0 ? .6 : 1 });
+    if (it.dead && !sheetReady(it.clsId)) return;
+    if (it.hurtT > 0) it.hurtT -= 1 / 60;
+    if (heroReady(it.clsId)) drawHero(c, it.x, it.y, it.clsId, { face: it.face, back: it.back, side: it.vside, walk: it.walk, moving: it.moving, run: it.buffs && it.buffs.rage > 0, atk: it.dead ? -1 : it.atkAnim, hurt: it.dead ? 0 : it.hurtT, deadT: it.dead ? time - (it.deadAt || time) : null, alpha: it.flash > 0 && !it.dead ? .7 : 1 });
     else drawHumanoid(c, it.x, it.y, { look: it.C.look, face: it.face, back: it.back, walk: it.walk, moving: it.moving, atk: it.atkAnim, alpha: it.flash > 0 ? .6 : 1 });
     return;
   }
@@ -1619,7 +1645,7 @@ function drawThing(it) {
     if (it.slow > 0) { c.fillStyle = 'rgba(160,230,255,.3)'; ell(c, it.x, it.y - 2, 12, 4); }
     return;
   }
-  if (it.kind === 'remote') { if (heroReady(it.c)) drawHero(c, it.x, it.y, it.c, { face: it.face, back: it.back, side: it.vside, walk: it.walk, moving: it.moving, atk: it.atkAnim, glow: it.f === 'light' ? 'rgba(150,190,255,.18)' : 'rgba(150,255,170,.16)' }); else if (CLASSES[it.c]) drawHumanoid(c, it.x, it.y, { look: CLASSES[it.c].look, face: it.face, back: it.back, walk: it.walk, moving: it.moving, atk: it.atkAnim }); return; }
+  if (it.kind === 'remote') { if (it.dead && !sheetReady(it.c)) return; if (heroReady(it.c)) drawHero(c, it.x, it.y, it.c, { face: it.face, back: it.back, side: it.vside, walk: it.walk, moving: it.moving, atk: it.dead ? -1 : it.atkAnim, deadT: it.dead ? time - (it.deadAt || time) : null, seed: 3, glow: it.f === 'light' ? 'rgba(150,190,255,.18)' : 'rgba(150,255,170,.16)' }); else if (CLASSES[it.c]) drawHumanoid(c, it.x, it.y, { look: CLASSES[it.c].look, face: it.face, back: it.back, walk: it.walk, moving: it.moving, atk: it.atkAnim }); return; }
   if (it.kind === 'ally') { drawHumanoid(c, it.x, it.y, { look: it.look, face: it.face, back: it.back, walk: it.walk, moving: it.moving, atk: it.atkAnim, alpha: it.flash > 0 ? .6 : 1 }); return; }
   if (it.kind === 'npc') { drawHumanoid(c, it.x, it.y, { look: it.look, face: it.face, walk: time * 2, moving: false }); return; }
   if (it.kind === 'minion' && it.wolf) { drawWolf(c, it.x, it.y, { D: WOLF_PET, face: it.face, walk: it.walk, moving: it.moving, atk: it.atkAnim, alpha: Math.min(1, it.life) * (it.flash > 0 ? .6 : 1), scale: .95 }); return; }
@@ -2428,6 +2454,7 @@ const NET = {
         if (!p) { p = { kind: 'remote', id, x: d.x, y: d.y, tx: d.x, ty: d.y, walk: 0, atkAnim: -1, chat: '', chatT: 0, cr: 7, scale: 1 }; this.peers.set(id, p); toast((d.n || 'Гравець') + ' у групі'); refreshNetDialog(); }
         const prevMk = p.mk;
         Object.assign(p, { n: d.n, c: d.c, f: d.f, l: d.l, mk: d.mk, mn: d.mn, face: d.fa, back: !!d.b, vside: !!d.vs, moving: !!d.mv, hp: d.hp, maxHp: d.mh, dead: !!d.d, seen: performance.now() });
+        if (p.dead && !p.deadAt) p.deadAt = time; if (!p.dead) p.deadAt = 0;
         if (prevMk !== d.mk || Math.hypot(d.x - p.x, d.y - p.y) > 200) { p.x = d.x; p.y = d.y; }
         p.tx = d.x; p.ty = d.y;
         if (d.a && p.atkAnim < 0) p.atkAnim = 0;
