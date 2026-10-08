@@ -173,7 +173,7 @@ function genWorld(cfg) {
       if (d >= z.r + 1) continue;
       if (z.kind === 'swamp' || z.kind === 'icefield' || z.kind === 'lavafield') { const m = fbm(x * 1.7 + 40, y * 1.7); G[i] = m < (z.kind === 'swamp' ? .44 : .38) ? WATER : DARK; }
       else if (z.kind === 'graves' || z.kind === 'webs' || z.kind === 'den') G[i] = DARK;
-      else if (z.kind === 'ruins') G[i] = fbm(x * 2.3 + 9, y * 2.3) < .52 ? STONE : DIRT;
+      else if (z.kind === 'ruins' || z.kind === 'fruins') G[i] = fbm(x * 2.3 + 9, y * 2.3) < .52 ? STONE : DIRT;
     }
   }
   for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) {
@@ -184,11 +184,29 @@ function genWorld(cfg) {
   const A = ARENA;
   for (let y = A.ty - 6; y <= A.ty + 6; y++) for (let x = A.tx - 6; x <= A.tx + 6; x++) { if (!inb(x, y)) continue; G[idx(x, y)] = STONE; RES[idx(x, y)] = 1; }
   let sd = 3;
-  for (const z of zones) carve(CAMP.tx, CAMP.ty, z.tx, z.ty, sd += 4);
-  const door = arenaDoor(A); carve(CAMP.tx, CAMP.ty, door.tx, door.ty, sd += 4);
-  for (const p of cfg.portals) carve(CAMP.tx, CAMP.ty, p.tx, p.ty, sd += 4);
-  for (const e of cfg.extra) carve(CAMP.tx, CAMP.ty, e[0], e[1], sd += 4);
-  if (cfg.dungeon) { const d = cfg.dungeon; carve(CAMP.tx, CAMP.ty, d.tx, d.ty + 2, sd += 4); for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const X = d.tx + dx, Y = d.ty + dy; if (inb(X, Y)) { RES[idx(X, Y)] = 1; if (G[idx(X, Y)] === WATER) G[idx(X, Y)] = DIRT; } } dentrs.push(addObj('dentr', d.tx, d.ty)); S[idx(d.tx - 1, d.ty)] = 1; S[idx(d.tx + 1, d.ty)] = 1; lights.push({ x: tc(d.tx), y: d.ty * T, r: 90, col: 'rgba(200,120,255,' }); }
+  const CH = cfg.chasm, chX = y => CH.cx + Math.sin(y * .13) * 2.5, bUsed = {};
+  const road = (tx, ty) => {
+    if (!CH || tx < CH.cx) return carve(CAMP.tx, CAMP.ty, tx, ty, sd += 4);
+    let b = CH.bridges[0]; for (const r of CH.bridges) if (Math.abs(r - ty) < Math.abs(b - ty)) b = r;
+    const c = Math.round(chX(b + .5));
+    if (!bUsed[b]) { bUsed[b] = 1; carve(CAMP.tx, CAMP.ty, c - 6, b, sd += 4); }
+    carve(c + 6, b, tx, ty, sd += 4);
+  };
+  for (const z of zones) road(z.tx, z.ty);
+  const door = arenaDoor(A); road(door.tx, door.ty);
+  for (const p of cfg.portals) road(p.tx, p.ty);
+  for (const e of cfg.extra) road(e[0], e[1]);
+  if (CH) {
+    // прірва з мостами
+    M._bridges = [];
+    for (const b of CH.bridges) { const c = Math.round(chX(b + .5)); for (let y = b - 1; y <= b + 2; y++) for (let x = c - 7; x <= c + 7; x++) { if (!inb(x, y)) continue; RES[idx(x, y)] = 1; if (y === b || y === b + 1) G[idx(x, y)] = DIRT; } M._bridges.push({ c, b }); }
+    for (let y = 2; y < MH - 2; y++) for (let x = 0; x < MW; x++) {
+      if (Math.abs(x + .5 - chX(y)) > CH.hw) continue;
+      const i = idx(x, y), br = CH.bridges.some(b => y === b || y === b + 1);
+      if (br) { G[i] = STONE; RES[i] = 1; } else { G[i] = WATER; RES[i] = 0; }
+    }
+  }
+  if (cfg.dungeon) { const d = cfg.dungeon; road(d.tx, d.ty + 2); for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const X = d.tx + dx, Y = d.ty + dy; if (inb(X, Y)) { RES[idx(X, Y)] = 1; if (G[idx(X, Y)] === WATER) G[idx(X, Y)] = DIRT; } } dentrs.push(addObj('dentr', d.tx, d.ty)); S[idx(d.tx - 1, d.ty)] = 1; S[idx(d.tx + 1, d.ty)] = 1; lights.push({ x: tc(d.tx), y: d.ty * T, r: 90, col: 'rgba(200,120,255,' }); }
   // arena walls
   for (let y = A.ty - 5; y <= A.ty + 5; y++) for (let x = A.tx - 5; x <= A.tx + 5; x++) {
     const edge = x === A.tx - 5 || x === A.tx + 5 || y === A.ty - 5 || y === A.ty + 5;
@@ -199,16 +217,19 @@ function genWorld(cfg) {
   lights.push({ x: tc(A.tx), y: tc(A.ty), r: 150, col: 'rgba(' + A.col + ',' });
   // camp
   const c = CAMP;
+  if (cfg.id === 'fortress') fortressCamp(c); else {
   const fire = addObj('fire', c.tx, c.ty); lights.push({ x: fire.x, y: fire.y - 8, r: 230, col: 'rgba(255,170,70,', fire: 1 });
   addObj('tent', c.tx - 4, c.ty - 3); addObj('tent', c.tx + 4, c.ty - 3); addObj('tent', c.tx, c.ty - 5);
   addObj('barrel', c.tx + 5, c.ty + 2); addObj('barrel', c.tx + 5, c.ty + 3); addObj('crate', c.tx - 5, c.ty + 3);
   addObj('banner', c.tx - 2, c.ty - 4, true); addObj('banner', c.tx + 2, c.ty - 4, true);
+  }
   // portals
   for (const p of cfg.portals) {
     for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const X = p.tx + dx, Y = p.ty + dy; if (inb(X, Y)) { RES[idx(X, Y)] = 1; if (G[idx(X, Y)] === WATER) G[idx(X, Y)] = DIRT; } }
     const o = addObj('portal', p.tx, p.ty, false, { to: p.to, lvl: p.lvl, fac: p.fac, col: MAPS[p.to].portalCol });
     portals.push(o); lights.push({ x: o.x, y: o.y - 18, r: 110, col: 'rgba(' + o.col + ',' });
   }
+  if (cfg.id === 'fortress') fortressDecor(cfg);
   // border
   for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) {
     const i = idx(x, y);
@@ -245,6 +266,15 @@ function genWorld(cfg) {
       if (R() < .1) addObj(pickFlora(), x, y, true, { v: R() });
       else if (R() < .04) addObj('rock', x, y, true, { v: R() });
       else if (R() < .06) decals.push({ t: 'bones', x, y, v: R() });
+      continue;
+    }
+    if (z && z.kind === 'fruins') {
+      const r = R();
+      if (r < .035) addObj('fruin', x, y, true, { v: R() });
+      else if (r < .055) addObj('fpillar', x, y, true, { v: R() });
+      else if (r < .075) addObj('ftomb', x, y, true, { v: R() });
+      else if (r < .088) addObj('fobelisk', x, y, true, { v: R() });
+      else if (r < .15) decals.push({ t: R() < .5 ? 'rubble' : 'bones', x, y, v: R() });
       continue;
     }
     if (z && z.kind === 'ruins') {
@@ -353,6 +383,29 @@ MAPS.light_start.portalCol = '120,200,255'; MAPS.dark_start.portalCol = '150,120
   c.dungeon = { tx: 60, ty: 44 };
   MAPS.forest.dungeon = { tx: 60, ty: 63 }; MAPS.ruins.dungeon = { tx: 60, ty: 63 }; MAPS.ice.dungeon = { tx: 60, ty: 63 }; MAPS.volcano.dungeon = { tx: 60, ty: 63 };
 })();
+// ---- Крижана Фортеця (намальована локація) ----
+MAPS.fortress = {
+  id: 'fortress', name: 'Крижана Фортеця', seed: 7177, lv: '20–28', dark: .4, tint: '12,22,52', liqT: 0, liquid: 'chasm', treeDens: .5, rock: 'frock', graveP: 0, snow: 1, splash: 'assets/fortress/splash.jpg',
+  pal: { 0: ['#b9c6d3', '#cfd9e3', '#a6b4c3'], 1: ['#8e9cad', '#a3b0bf', '#7d8b9c'], 2: ['#cbd5df', '#dbe3eb', '#b9c5d1'], 3: ['#070c16', '#0d1626', '#04070e'], 4: ['#5f6878', '#6e7787', '#525a69'] },
+  tex: { 0: 't_snowgrass', 1: 't_snowstone2', 2: 't_snowgrass', 4: 't_snowstone' }, texA: { 0: .38, 1: .48, 2: .12, 4: .85 },
+  shore: '#e8f0f6', flora: [['fpine', .62], ['fdead', .26], ['fsnow', .12]], decals: ['snowtuft', 'icecrack', 'snowtuft', 'bones'],
+  camp: { tx: 14, ty: 56 },
+  zones: [
+    { tx: 20, ty: 34, r: 10, kind: 'den', spawn: [['iceWolf', 20, 22, 12]] },
+    { tx: 22, ty: 13, r: 9, kind: 'fruins', spawn: [['frostSkel', 21, 23, 8], ['frostUndead', 21, 23, 6]] },
+    { tx: 60, ty: 54, r: 10, kind: 'icefield', spawn: [['harpy', 23, 25, 8], ['iceElem', 23, 25, 5]] },
+    { tx: 82, ty: 46, r: 9, kind: 'den', spawn: [['troll', 24, 26, 9]] },
+    { tx: 62, ty: 24, r: 9, kind: 'fruins', spawn: [['frostGuard', 25, 27, 12]] },
+    { ring: 1, spawn: [['iceWolf', 20, 21, 6]] }],
+  arena: { tx: 82, ty: 11, open: 's', boss: ['lich', 28], col: '150,170,255' },
+  portals: [{ tx: 5, ty: 64, to: 'ice', lvl: 1 }],
+  dungeon: { tx: 28, ty: 62 },
+  chasm: { cx: 41, hw: 2.6, bridges: [20, 44, 62] },
+  extra: [],
+  quests: [], hunt: [['frostGuard', 4], ['troll', 3]]
+};
+MAPS.fortress.portalCol = '160,190,255';
+MAPS.ice.portals.push({ tx: 90, ty: 58, to: 'fortress', lvl: 1 });
 const FSTART = { light: 'light_start', dark: 'dark_start' };
 
 // ---- story ----
@@ -379,6 +432,7 @@ const LORE = {
   forest: ['Порча отруїла Зачарований Ліс. Павуки виросли до розмірів коня, а їхня Королева плете кокони з мандрівників.', 'Ліс гниє, як і ми, але без розуму. Королева павуків годує свій виплід усім, що рухається.'],
   ruins: ['Руїни Фортеці — колишня цитадель Ардана. Лицар-Привид досі охороняє тронну залу.', 'Цитадель Ардана. Лицар-Привид знає, куди пішов король. Змусь його заговорити — або впокой.'],
   ice: ['У Крижаних Горах Ардан шукав Серце Зими, щоб заморозити саму смерть. Велетень, якого він розбудив, досі лютує.', 'Холод не страшний мертвим, але Крижаний Велетень трощить і кістки. Його розбудив Ардан.'],
+  fortress: ['Крижана Фортеця — твердиня, яку Ардан звів над прірвою. Тепер нею править Лич, і мертва варта досі стоїть на мурах.', 'Крижана Фортеця. Лич думає, що він король мертвих. Нагадай йому, що Нежить нікому не кланяється.'],
   volcano: ['Вулканічна Пустка — кінець шляху. Володар Полум\'я — те, на що перетворився Ардан. Знищ його, і Порча згасне.', 'Володар Полум\'я — це Ардан. Знищ його, і Нежить нарешті стане вільною від Порчі.'],
   light_city: ['Світлоград — столиця живих. Тут кують найкращу сталь у королівстві. Варта завжди на сторожі.', ''],
   dark_city: ['', 'Некрополь Морвен — місто мертвих. Тут торгують кістками, отрутами і прокляттями.']
@@ -392,6 +446,7 @@ const DUNGEONS = {
   forest: { name: 'Павуче Гніздо', lvl: 17, types: ['spider', 'wolf'], boss: 'spiderQueen' },
   ruins: { name: 'Підземелля Цитаделі', lvl: 21, types: ['deadKnight', 'archer'], boss: 'ghostKnight' },
   ice: { name: 'Крижані Печери', lvl: 25, types: ['yeti', 'iceElem'], boss: 'frostGiant' },
+  fortress: { name: 'Склепи Лича', lvl: 27, types: ['frostGuard', 'frostSkel', 'frostUndead'], boss: 'lich' },
   volcano: { name: 'Серце Вулкану', lvl: 30, types: ['demon', 'imp'], boss: 'flameLord' }
 };
 const DIFFS = {
@@ -554,15 +609,135 @@ function buildSprites2() {
   });
 }
 
+// ============ fortress art (assets/fortress) ============
+const FIMG = {};
+['arch', 'arch2', 'banner', 'banner_s', 'bannerpole', 'brazier', 'bridge', 'campfire', 'chest', 'crates', 'crates2', 'crystal', 'deadtree', 'fence', 'icetomb', 'lamppost',
+  'obelisk_s', 'pillar', 'pine', 'rocks', 'ruin', 'shrine', 'snowpile', 'tent', 'tent2', 't_snowgrass', 't_snowstone', 't_snowstone2', 't_water',
+  'm_elemental', 'm_guard', 'm_harpy', 'm_lich', 'm_skeleton', 'm_troll', 'm_undead', 'm_wolf'].forEach(n => {
+  const im = new Image(); im.onload = () => { if (n[0] === 't' && n[1] === '_' && M && M.tex && ['t_snowgrass', 't_snowstone', 't_snowstone2', 't_water'].every(fReady) && !M._texDone) renderGround(); };
+  im.src = 'assets/fortress/' + n + '.png'; FIMG[n] = im;
+});
+function fReady(n) { const im = FIMG[n]; return !!(im && im.complete && im.naturalWidth); }
+// type → картинка, висота на екрані, світло
+const FOBJ = {
+  fpine: { f: 'pine', h: 80, flip: 1 }, fdead: { f: 'deadtree', h: 76, flip: 1 }, frock: { f: 'rocks', h: 42, flip: 1 }, fsnow: { f: 'snowpile', h: 32, flip: 1 },
+  farch: { f: 'arch', h: 104 }, farch2: { f: 'arch2', h: 84 }, fruin: { f: 'ruin', h: 56, flip: 1 }, fpillar: { f: 'pillar', h: 62 }, fshrine: { f: 'shrine', h: 70 },
+  fcrystal: { f: 'crystal', h: 50, flip: 1, light: '140,210,255', lr: 90 }, fobelisk: { f: 'obelisk_s', h: 42 }, ftomb: { f: 'icetomb', h: 34, flip: 1 },
+  fbanner: { f: 'banner', h: 86 }, fbanner_s: { f: 'banner_s', h: 52 }, fpole: { f: 'bannerpole', h: 80 },
+  fbrazier: { f: 'brazier', h: 32, fire: 1, light: '255,160,70', lr: 120 }, fcamp: { f: 'campfire', h: 36, fire: 1, light: '255,170,70', lr: 230 },
+  ftent: { f: 'tent', h: 80 }, ftent2: { f: 'tent2', h: 72 }, fcrates: { f: 'crates', h: 40 }, fcrates2: { f: 'crates2', h: 40 }, fchest: { f: 'chest', h: 24 },
+  ffence: { f: 'fence', h: 22 }, flamp: { f: 'lamppost', h: 84, light: '255,190,110', lr: 110, ly: 72 }
+};
+function fAdd(type, tx, ty, solid = true) {
+  if (!inb(tx, ty) || G[idx(tx, ty)] === WATER) return null;
+  const o = addObj(type, tx, ty, solid, { v: R() }), F = FOBJ[type];
+  if (F.light) lights.push({ x: o.x, y: o.y - (F.ly || F.h * .5), r: F.lr, col: 'rgba(' + F.light + ',', fire: F.fire ? 1 : 0 });
+  return o;
+}
+function fortressCamp(c) {
+  fAdd('fcamp', c.tx, c.ty);
+  fAdd('ftent', c.tx - 4, c.ty - 4); fAdd('ftent2', c.tx + 4, c.ty - 4);
+  fAdd('fcrates2', c.tx - 6, c.ty + 3); fAdd('fcrates', c.tx + 6, c.ty + 2); fAdd('fchest', c.tx + 5, c.ty + 4);
+  fAdd('flamp', c.tx - 7, c.ty - 1); fAdd('flamp', c.tx + 7, c.ty - 1);
+  fAdd('fbanner_s', c.tx - 1, c.ty - 6); fAdd('fbanner_s', c.tx + 1, c.ty - 6);
+  for (const dx of [-3, -2, 2, 3]) fAdd('ffence', c.tx + dx * 2, c.ty + 7);
+}
+function fortressDecor(cfg) {
+  const A = ARENA;
+  // брама цитаделі
+  fAdd('farch', A.tx, A.ty + 5, false);
+  fAdd('fbanner', A.tx - 3, A.ty + 6); fAdd('fbanner', A.tx + 3, A.ty + 6);
+  fAdd('fbrazier', A.tx - 3, A.ty + 8); fAdd('fbrazier', A.tx + 3, A.ty + 8);
+  for (const o of objs) if (o.type === 'pillar') o.type = 'fpillar';
+  fAdd('fshrine', A.tx, A.ty - 4); fAdd('fcrystal', A.tx - 4, A.ty - 4); fAdd('fcrystal', A.tx + 4, A.ty - 4);
+  // мости: ліхтарі й жаровні на краях
+  for (const b of M._bridges) {
+    fAdd('fbrazier', b.c - 5, b.b - 1); fAdd('fbrazier', b.c + 5, b.b - 1);
+    fAdd('fpole', b.c - 6, b.b + 2); fAdd('fpole', b.c + 6, b.b + 2);
+  }
+  // кристали вздовж прірви та в полі гарпій
+  let n = 0, tries = 0;
+  while (n < 26 && tries++ < 2000) {
+    const y = 3 + Math.floor(R() * (MH - 6)), side = R() < .5 ? -1 : 1, x = Math.round(cfg.chasm.cx + Math.sin(y * .13) * 2.5 + side * (4 + R() * 3));
+    const z = cfg.zones[2], inField = R() < .35;
+    const X = inField ? z.tx + Math.round((R() - .5) * 2 * z.r) : x, Y = inField ? z.ty + Math.round((R() - .5) * 2 * z.r) : y;
+    if (!inb(X, Y) || S[idx(X, Y)] || RES[idx(X, Y)] || G[idx(X, Y)] === WATER) continue;
+    fAdd(R() < .7 ? 'fcrystal' : 'fsnow', X, Y); n++;
+  }
+  // дорожні ліхтарі біля табору
+  fAdd('flamp', CAMP.tx + 9, CAMP.ty - 7); fAdd('farch2', CAMP.tx + 2, CAMP.ty - 11, false);
+}
+function drawFObj(o) {
+  const F = FOBJ[o.type], im = FIMG[F.f];
+  if (!fReady(F.f)) return;
+  const h = F.h * (F.flip ? .9 + (o.v || 0) * .2 : 1), w = im.naturalWidth * h / im.naturalHeight, c = ctx;
+  c.fillStyle = 'rgba(0,0,0,.3)'; ell(c, o.x, o.y - 1, w * .32, 4);
+  if (F.flip && o.v > .5) { c.save(); c.translate(o.x, 0); c.scale(-1, 1); c.drawImage(im, -w / 2, o.y - h, w, h); c.restore(); }
+  else c.drawImage(im, o.x - w / 2, o.y - h, w, h);
+  if (F.fire && Math.random() < .35) parts.push({ x: o.x + rnd(-4, 4), y: o.y - h * .8, vx: rnd(-8, 8), vy: -40, life: .7, max: .7, col: Math.random() < .5 ? '#ffb040' : '#ff6a1a', size: 1.8, grav: 0 });
+  if (o.type === 'fcrystal' && Math.random() < .03) parts.push({ x: o.x + rnd(-10, 10), y: o.y - rnd(10, 40), vx: 0, vy: -14, life: 1.2, max: 1.2, col: '#bfeaff', size: 1.6, grav: 0 });
+}
+// намальовані монстри: легке «дихання», крок, випад при атаці
+function drawSpriteEnemy(c, e, D, alpha) {
+  if (!fReady(D.img)) return drawCrystal(c, e.x, e.y, { D: { col: '#8fd4ff', col2: '#dff4ff' }, t: time + e.hx, alpha, scale: 1 });
+  const im = FIMG[D.img], h = D.h, w = im.naturalWidth * h / im.naturalHeight;
+  const breathe = 1 + Math.sin(time * 2.4 + e.hx) * .018, step = e.moving ? Math.abs(Math.sin(e.walk * 1.2)) * 2.5 : 0;
+  const fly = D.fly ? 10 + Math.sin(time * 3 + e.hx) * 4 : 0;
+  let lunge = 0; if (e.atkAnim >= 0 && e.atkAnim < 1) lunge = Math.sin(e.atkAnim * Math.PI) * (D.ranged ? 3 : 8);
+  c.save(); c.globalAlpha = alpha;
+  c.fillStyle = 'rgba(0,0,0,.32)'; ell(c, e.x, e.y, w * .3 * (D.fly ? .7 : 1), 4);
+  if (D.aura) { c.fillStyle = 'rgba(' + D.aura + ',' + (.14 + Math.sin(time * 3) * .05) + ')'; ell(c, e.x, e.y - h * .45 - fly, w * .55, h * .55); }
+  c.translate(e.x + lunge * e.face, e.y - fly - step);
+  const flip = D.sf ? e.face !== D.sf : e.face < 0;
+  c.scale(flip ? -1 : 1, breathe);
+  c.rotate(e.moving ? Math.sin(e.walk * 1.2) * .04 : 0);
+  c.drawImage(im, -w / 2, -h, w, h);
+  c.restore();
+  if (D.aura && Math.random() < .2) parts.push({ x: e.x + rnd(-14, 14), y: e.y - rnd(10, h), vx: 0, vy: -20, life: .8, max: .8, col: 'rgb(' + D.aura + ')', size: 2, grav: 0 });
+}
+function openSplash(id) {
+  const m = MAPS[id];
+  openDialog(`<img src="${m.splash}" alt="" style="width:100%;border-radius:8px;display:block;margin:-4px 0 10px">
+    <h3>❄ ${m.name}</h3><p>Покинута фортеця серед снігових гір. Тут живуть нежить, крижані створіння й давні стражі. Через прірву ведуть три мости, а в цитаделі на північному сході чекає Лич.</p>
+    <p><small>Рівні ${m.lv}. Поговори з людьми в таборі — у них є завдання.</small></p>
+    <button class="btn" data-act="close">У фортецю!</button>`, 'wide');
+}
+
 // ============ ground render ============
 let mapCv = null, miniBase = null;
+const TEXPAT = {};
+function texPattern(g, n) {
+  // дзеркальна плитка: текстура стає безшовною
+  if (!TEXPAT[n]) { const im = FIMG[n], w = im.naturalWidth - 4, h = im.naturalHeight - 4, c = document.createElement('canvas'); c.width = w * 2; c.height = h * 2; const x = c.getContext('2d');
+    for (const [fx, fy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) { x.save(); x.translate(fx ? w * 2 : 0, fy ? h * 2 : 0); x.scale(fx ? -1 : 1, fy ? -1 : 1); x.drawImage(im, 2, 2, w, h, 0, 0, w, h); x.restore(); }
+    TEXPAT[n] = c; }
+  return g.createPattern(TEXPAT[n], 'repeat');
+}
 function renderGround() {
   mapCv = document.createElement('canvas'); mapCv.width = MW * T; mapCv.height = MH * T;
   const g = mapCv.getContext('2d');
   const r = mulberry32(99);
+  const TEX = M.tex && ['t_snowgrass', 't_snowstone', 't_snowstone2', 't_water'].every(fReady) ? M.tex : null; M._texDone = !!TEX;
   for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) {
     const t = G[idx(x, y)], c = M.pal[t], px = x * T, py = y * T;
     g.fillStyle = c[0]; g.fillRect(px, py, T, T);
+    if (TEX && TEX[t]) {
+      g.globalAlpha = M.texA[t];
+      if (t === STONE) { const im = FIMG[TEX[t]], h = (x * 73856093 ^ y * 19349663) >>> 0, sx = 4 + h % (im.naturalWidth - 40), sy = 4 + (h >> 8) % (im.naturalHeight - 40); g.drawImage(im, sx, sy, 32, 32, px, py, T, T); g.globalAlpha = 1; continue; }
+      g.fillStyle = texPattern(g, TEX[t]); g.fillRect(px, py, T, T); g.globalAlpha = 1;
+    }
+    if (t === WATER && M.liquid === 'chasm') {
+      // бездонна прірва: темрява, туман і водоспади на дні
+      const top = !(inb(x, y - 1) && G[idx(x, y - 1)] === WATER);
+      if (TEX && r() < .5) { g.globalAlpha = .28; const im = FIMG.t_water; g.drawImage(im, (x * 37 % 150), 20, 32, 32, px, py, T, T); g.globalAlpha = 1; }
+      g.fillStyle = 'rgba(120,160,220,' + (.04 + r() * .05) + ')'; g.fillRect(px + r() * 20, py + r() * 24, 10, 6);
+      const nb = (dx, dy) => { const X = x + dx, Y = y + dy; return inb(X, Y) && G[idx(X, Y)] !== WATER; };
+      if (nb(-1, 0)) { const gr = g.createLinearGradient(px, 0, px + 14, 0); gr.addColorStop(0, '#2a3446'); gr.addColorStop(1, 'rgba(7,12,22,0)'); g.fillStyle = gr; g.fillRect(px, py, 14, T); g.fillStyle = '#e8f0f6'; g.fillRect(px, py, 2, T); }
+      if (nb(1, 0)) { const gr = g.createLinearGradient(px + T, 0, px + T - 10, 0); gr.addColorStop(0, '#1c2433'); gr.addColorStop(1, 'rgba(7,12,22,0)'); g.fillStyle = gr; g.fillRect(px + T - 10, py, 10, T); g.fillStyle = '#e8f0f6'; g.fillRect(px + T - 2, py, 2, T); }
+      if (top || nb(0, -1)) { g.fillStyle = '#3a4558'; g.fillRect(px, py, T, 12); g.fillStyle = '#566276'; for (let k = 0; k < 4; k++) g.fillRect(px + k * 8 + r() * 3, py + 2, 3, 8 + r() * 6); g.fillStyle = '#e8f0f6'; g.fillRect(px, py, T, 3); }
+      if (nb(0, 1)) { g.fillStyle = 'rgba(200,220,240,.18)'; g.fillRect(px, py + T - 6, T, 6); g.fillStyle = '#e8f0f6'; g.fillRect(px, py + T - 2, T, 2); }
+      continue;
+    }
     if (t === STONE) {
       g.fillStyle = c[1]; g.fillRect(px + 1, py + 1, 14, 14); g.fillRect(px + 17, py + 17, 14, 14);
       g.fillStyle = c[2]; g.fillRect(px + 17, py + 1, 14, 14); g.fillRect(px + 1, py + 17, 14, 14);
@@ -585,15 +760,21 @@ function renderGround() {
     }
     if (t === DIRT) {
       const nb = (dx, dy) => { const X = x + dx, Y = y + dy; return inb(X, Y) && (G[idx(X, Y)] === GRASS || G[idx(X, Y)] === DARK); };
-      g.fillStyle = M.id === 'ice' ? 'rgba(230,240,248,.6)' : 'rgba(40,50,30,.45)';
+      g.fillStyle = M.id === 'ice' || M.id === 'fortress' ? 'rgba(230,240,248,.6)' : 'rgba(40,50,30,.45)';
       if (nb(0, -1)) for (let k = 0; k < 6; k++) g.fillRect(px + r() * T, py, 3, 2 + r() * 4);
       if (nb(0, 1)) for (let k = 0; k < 6; k++) g.fillRect(px + r() * T, py + T - 4, 3, 4);
       if (nb(-1, 0)) for (let k = 0; k < 6; k++) g.fillRect(px, py + r() * T, 2 + r() * 4, 3);
       if (nb(1, 0)) for (let k = 0; k < 6; k++) g.fillRect(px + T - 4, py + r() * T, 4, 3);
     }
   }
+  // мости через прірву
+  if (M._bridges && M.id === 'fortress' && fReady('bridge')) for (const b of M._bridges) {
+    const im = FIMG.bridge, w = 7 * T, h = im.naturalHeight * w / im.naturalWidth, cx = (Math.sin((b.b + .5) * .13) * 2.5 + M.chasm.cx) * T;
+    g.fillStyle = 'rgba(0,0,0,.35)'; g.fillRect(cx - w / 2 + 8, b.b * T + 2 * T, w - 16, 10);
+    g.drawImage(im, cx - w / 2, b.b * T - 14, w, h);
+  }
   // camp ring stones
-  if (!M.type) for (let a = 0; a < 24; a++) {
+  if (!M.type && M.id !== 'fortress') for (let a = 0; a < 24; a++) {
     const ang = a / 24 * Math.PI * 2, x = tc(CAMP.tx) + Math.cos(ang) * 6.3 * T, y = tc(CAMP.ty) + Math.sin(ang) * 6.3 * T;
     g.fillStyle = '#58545f'; ell(g, x, y, 5, 3.5); g.fillStyle = '#6f6b78'; ell(g, x - 1, y - 1, 3, 2);
   }
@@ -1022,9 +1203,17 @@ const ETYPES = {
   // ice
   yeti: { name: 'Йєті', hp: l => 90 + l * 24, dmg: l => 9 + l * 2.8, speed: 55, range: 30, cd: 1.6, aggro: 150, xp: l => 28 + l * 9, gold: [6, 13], scale: 1.3, blood: '#e8eef2',
     look: { skin: '#9ab0c0', armor: '#e6edf2', armor2: '#c8d4dc', trim: '#c8d4dc', legs: '#d8e2e8', boots: '#b8c6d0', head: 'none', hair: '#f2f6f8', armsFwd: 1, eyes: '#2a4a6a', rags: 1 } },
-  iceElem: { name: 'Крижаний дух', draw: 'crystal', hp: l => 60 + l * 18, dmg: l => 8 + l * 2.7, speed: 50, range: 150, cd: 2.0, aggro: 175, xp: l => 28 + l * 9, gold: [6, 13], ranged: 1, pcol: '170,230,255', col: '#8fd4ff', col2: '#dff4ff', blood: '#bfeaff' },
+  iceElem: { name: 'Крижаний дух', draw: 'sprite', img: 'm_elemental', h: 50, hp: l => 60 + l * 18, dmg: l => 8 + l * 2.7, speed: 50, range: 150, cd: 2.0, aggro: 175, xp: l => 28 + l * 9, gold: [6, 13], ranged: 1, pcol: '170,230,255', col: '#8fd4ff', col2: '#dff4ff', blood: '#bfeaff' },
   frostGiant: { name: 'Крижаний Велетень', hp: () => 7000, dmg: () => 90, speed: 52, range: 50, cd: 2.0, aggro: 220, xp: () => 11000, gold: [900, 1200], boss: 1, scale: 2, blood: '#bfeaff',
     look: { skin: '#86b6dc', armor: '#3a5a80', armor2: '#2a4060', trim: '#dff4ff', legs: '#2a4060', boots: '#1a2a40', head: 'horned', weapon: 'bigaxe', eyes: '#dff4ff', beard: 1 } },
+  // Крижана Фортеця (намальовані спрайти)
+  iceWolf: { name: 'Крижаний вовк', draw: 'sprite', img: 'm_wolf', h: 40, sf: 1, hp: l => 80 + l * 20, dmg: l => 9 + l * 2.8, speed: 84, range: 28, cd: 1.1, aggro: 170, xp: l => 30 + l * 9, gold: [6, 13], blood: '#bfeaff' },
+  frostSkel: { name: 'Крижаний скелет', draw: 'sprite', img: 'm_skeleton', h: 52, hp: l => 75 + l * 21, dmg: l => 9 + l * 2.8, speed: 58, range: 28, cd: 1.4, aggro: 150, xp: l => 30 + l * 9, gold: [6, 14], blood: '#e2dccb' },
+  frostUndead: { name: 'Обморожений мрець', draw: 'sprite', img: 'm_undead', h: 50, hp: l => 85 + l * 22, dmg: l => 9 + l * 2.9, speed: 46, range: 26, cd: 1.5, aggro: 140, xp: l => 30 + l * 9, gold: [6, 14], blood: '#6a8a9a' },
+  frostGuard: { name: 'Страж Фортеці', draw: 'sprite', img: 'm_guard', h: 54, hp: l => 110 + l * 26, dmg: l => 10 + l * 3, speed: 55, range: 30, cd: 1.5, aggro: 155, xp: l => 34 + l * 10, gold: [8, 16], blood: '#9ab0d0' },
+  troll: { name: 'Гірський троль', draw: 'sprite', img: 'm_troll', h: 66, hp: l => 160 + l * 32, dmg: l => 13 + l * 3.4, speed: 46, range: 34, cd: 1.9, aggro: 140, xp: l => 44 + l * 12, gold: [10, 20], blood: '#7a6a6a' },
+  harpy: { name: 'Крижана гарпія', draw: 'sprite', img: 'm_harpy', h: 50, sf: 1, fly: 1, hp: l => 70 + l * 19, dmg: l => 9 + l * 2.8, speed: 72, range: 150, cd: 1.9, aggro: 180, xp: l => 32 + l * 10, gold: [7, 15], ranged: 1, pcol: '150,200,255', blood: '#bfeaff' },
+  lich: { name: 'Лич Крижаної Фортеці', draw: 'sprite', img: 'm_lich', h: 84, aura: '150,140,255', hp: () => 9000, dmg: () => 105, speed: 54, range: 150, cd: 1.6, aggro: 230, xp: () => 18000, gold: [1300, 1800], boss: 1, scale: 1.4, ranged: 1, pcol: '170,140,255', blood: '#c9c0ff' },
   // volcano
   imp: { name: 'Біс', hp: l => 60 + l * 18, dmg: l => 9 + l * 2.8, speed: 70, range: 145, cd: 1.8, aggro: 175, xp: l => 32 + l * 10, gold: [7, 15], ranged: 1, pcol: '255,130,40', scale: .85, blood: '#ff7a2a',
     look: { skin: '#c8402a', armor: '#5a1a12', armor2: '#3a100a', trim: '#ffb040', legs: '#5a1a12', boots: '#2a0a06', head: 'horned', eyes: '#ffe040', rags: 1 } },
@@ -1066,7 +1255,7 @@ function loadMap(id) { const c = MAPS[id]; if (c.type === 'city') { genCity(c); 
 let state = 'menu', P = null, minion = null, npcs = [];
 const projs = [], parts = [], floats = [], rings = [], teles = [];
 let camX = 0, camY = 0, time = 0, markT = 0, mark = null;
-function zoneAt(z) { if (z === 'camp') return CAMP; if (z === 'arena') return ARENA; if (typeof z === 'string' && z[0] === 'p') return portals[+z.slice(1)] || CAMP; return M.zones[z] || CAMP; }
+function zoneAt(z) { if (z === 'bridge' && M._bridges && M._bridges.length) { const b = M._bridges[1] || M._bridges[0]; return { tx: Math.round(M.chasm.cx + Math.sin((b.b + .5) * .13) * 2.5), ty: b.b }; } if (z === 'camp') return CAMP; if (z === 'arena') return ARENA; if (typeof z === 'string' && z[0] === 'p') return portals[+z.slice(1)] || CAMP; return M.zones[z] || CAMP; }
 function questFor(i) {
   const Q = M.quests;
   if (!Q.length && !M.hunt.length) return { t: M.qTitle || M.name, d: M.qDesc || '', type: 'none', n: 0, xp: 0, gold: 0, at: CAMP };
@@ -1087,7 +1276,7 @@ function makePlayer(d) {
   P = { kind: 'player', clsId: d.cls, C, faction: C.faction, name: d.name, lvl: d.lvl || 1, xp: d.xp || 0, gold: d.gold || 0, hpPot: d.hpPot != null ? d.hpPot : 3, mpPot: d.mpPot != null ? d.mpPot : 2,
     qs: d.qs || { cursed: { i: d.quest || 0, p: d.qprog || 0 } }, questIdx: 0, qprog: 0,
     x: tc(CAMP.tx), y: tc(CAMP.ty) + 70, face: 1, back: false, walk: 0, moving: false, cds: [0, 0, 0, 0], buffs: {}, target: null, path: null, autoAtk: false,
-    pending: -1, talkTo: null, atkAnim: -1, stun: 0, dead: false, combatT: 99, dash: null, flash: 0, cr: 7, slow: 0, portalLock: true, dlock: 1, bag: d.bag || [], eq: d.eq || {}, quests: d.quests || {}, qdone: d.qdone || [], track: d.track || null };
+    pending: -1, talkTo: null, atkAnim: -1, stun: 0, dead: false, combatT: 99, dash: null, flash: 0, cr: 7, slow: 0, portalLock: true, dlock: 1, bag: d.bag || [], eq: d.eq || {}, quests: d.quests || {}, qdone: d.qdone || [], track: d.track || null, seen: d.seen || {} };
   if (!d.eq) P.eq.weapon = makeItem('weapon', 1, 0, d.cls);
   syncQuest();
   if (d.x && d.y && canStand(d.x, d.y, 7)) { P.x = d.x; P.y = d.y; }
@@ -1120,7 +1309,9 @@ function changeMap(id, from) {
   if (minion) { minion.x = P.x; minion.y = P.y; minion.target = null; }
   projs.length = 0; teles.length = 0; parts.length = 0; floats.length = 0;
   burst(P.x, P.y - 14, 'rgb(' + M.portalCol + ')', 30, 80, .8, 3, -30);
-  toast(M.name + (M.type === 'city' ? ' · ' + M.lv : ' · рівні ' + M.lv)); writeSave();
+  toast(M.name + (M.type === 'city' ? ' · ' + M.lv : ' · рівні ' + M.lv));
+  if (M.splash && !P.seen[M.id]) { P.seen[M.id] = 1; openSplash(M.id); }
+  writeSave();
 }
 function recalc() {
   const C = P.C, m = lvlMult(P.lvl);
@@ -1137,7 +1328,7 @@ function writeSave() {
   if (!dg) P.qs[M.id] = { i: P.questIdx, p: P.qprog };
   const qs = Object.assign({}, P.qs); delete qs.dungeon;
   const px = dg ? (M.entr ? M.entr.x : 0) : P.x, py = dg ? (M.entr ? M.entr.y : 0) : P.y;
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ cls: P.clsId, name: P.name, lvl: P.lvl, xp: P.xp, gold: P.gold, hpPot: P.hpPot, mpPot: P.mpPot, qs, map: dg ? M.parent : M.id, x: Math.round(px), y: Math.round(py), bag: P.bag, eq: P.eq, quests: P.quests, qdone: P.qdone, track: P.track })); } catch (e) { }
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ cls: P.clsId, name: P.name, lvl: P.lvl, xp: P.xp, gold: P.gold, hpPot: P.hpPot, mpPot: P.mpPot, qs, map: dg ? M.parent : M.id, x: Math.round(px), y: Math.round(py), bag: P.bag, eq: P.eq, quests: P.quests, qdone: P.qdone, track: P.track, seen: P.seen })); } catch (e) { }
 }
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (e) { } }
 
@@ -1573,7 +1764,7 @@ function render() {
   // health bars / names / floats (above lighting)
   for (const e of enemies) {
     if (e.dead || e.x < camX - 40 || e.x > camX + vw + 40 || e.y < camY - 40 || e.y > camY + vh + 80) continue;
-    const top = e.y - (ETYPES[e.type].draw === 'ghost' ? 42 : ETYPES[e.type].draw === 'wolf' || ETYPES[e.type].draw === 'spider' ? 28 : 40) * e.scale;
+    const top = ETYPES[e.type].draw === 'sprite' ? e.y - ETYPES[e.type].h - (ETYPES[e.type].fly ? 16 : 4) : e.y - (ETYPES[e.type].draw === 'ghost' ? 42 : ETYPES[e.type].draw === 'wolf' || ETYPES[e.type].draw === 'spider' ? 28 : 40) * e.scale;
     if (e.hp < e.maxHp || P && P.target === e || ETYPES[e.type].boss) {
       const w = e.scale > 1 ? 40 : 26; ctx.fillStyle = '#000'; ctx.fillRect(e.x - w / 2 - 1, top - 1, w + 2, 5); ctx.fillStyle = '#c0392b'; ctx.fillRect(e.x - w / 2, top, w * e.hp / e.maxHp, 3);
     }
@@ -1649,6 +1840,7 @@ function drawThing(it) {
     else if (D.draw === 'wolf') drawWolf(c, it.x, it.y, { D, face: it.face, walk: it.walk, moving: it.moving, atk: it.atkAnim, alpha: a, scale: it.scale });
     else if (D.draw === 'spider') drawSpider(c, it.x, it.y, { D, face: it.face, walk: it.walk, moving: it.moving, atk: it.atkAnim, alpha: a, scale: it.scale });
     else if (D.draw === 'crystal') drawCrystal(c, it.x, it.y, { D, t: time + it.hx, alpha: a, scale: it.scale });
+    else if (D.draw === 'sprite') drawSpriteEnemy(c, it, D, a);
     else {
       if (D.fiery && Math.random() < .5) parts.push({ x: it.x + rnd(-14, 14), y: it.y - rnd(10, 60), vx: rnd(-10, 10), vy: -50, life: .7, max: .7, col: Math.random() < .5 ? '#ffb040' : '#ff5a1a', size: 2.5, grav: 0 });
       drawHumanoid(c, it.x, it.y, { look: D.look, face: it.face, back: it.back, walk: it.walk, moving: it.moving, atk: it.atkAnim, alpha: a * (D.alpha || 1), scale: it.scale });
@@ -1664,6 +1856,7 @@ function drawThing(it) {
   if (it.kind === 'minion' && it.wolf) { drawWolf(c, it.x, it.y, { D: WOLF_PET, face: it.face, walk: it.walk, moving: it.moving, atk: it.atkAnim, alpha: Math.min(1, it.life) * (it.flash > 0 ? .6 : 1), scale: .95 }); return; }
   if (it.kind === 'minion') { drawHumanoid(c, it.x, it.y, { look: MINION_LOOK, face: it.face, back: it.back, walk: it.walk, moving: it.moving, atk: it.atkAnim, alpha: Math.min(1, it.life) * (it.flash > 0 ? .6 : .95), scale: .9 }); return; }
   // objects
+  if (FOBJ[it.type]) return drawFObj(it);
   let s;
   switch (it.type) {
     case 'tree': s = SPR['tree' + Math.floor(it.v * 3)]; break;
@@ -1915,6 +2108,7 @@ function frame(now) {
     if (!paused || NET.role) updateNpcs(dt);
     if (!paused) { updatePlayer(dt); updateMinion(dt); updateAllies(dt); updateEnemies(dt); updateProjs(dt); }
     updateFx(dt);
+    if (M.snow) for (let k = 0; k < 2; k++) parts.push({ x: P.x + rnd(-460, 460), y: P.y + rnd(-340, 200), vx: rnd(-28, -10), vy: rnd(22, 40), life: rnd(1.6, 2.6), max: 2.6, col: Math.random() < .5 ? '#f2f8ff' : '#c8daf0', size: rnd(1.2, 2.4), grav: 40 });
     updateHud(); drawMinimap();
     saveT += dt; if (saveT > 10) { saveT = 0; writeSave(); }
   } else {
@@ -2394,6 +2588,7 @@ Object.assign(NPC_LOOKS, {
   huntsman: { skin: '#d8a07a', armor: '#6a4a2a', armor2: '#4a3220', trim: '#9a7a3a', legs: '#4a3a2a', boots: '#2a1d14', head: 'none', hair: '#3a2a1a', beard: 1, weapon: 'bow', cape: '#5a3a1a' },
   ghostscribe: { skin: '#cfe6ff', armor: '#7a9ac8', armor2: '#5a7aa8', trim: '#ffffff', legs: '#5a7aa8', boots: '#4a6a98', head: 'none', hair: '#e0eeff', beard: 1, robe: 1 },
   merc: { skin: '#c89070', armor: '#4a4a4a', armor2: '#2e2e2e', trim: '#a03030', legs: '#2e2e2e', boots: '#1a1a1a', head: 'helm', weapon: 'axe', cape: '#5a1a1a' },
+  frostknight: { skin: '#e8d0b8', armor: '#5a6a80', armor2: '#3a4a60', trim: '#9fd8ff', legs: '#3a4a60', boots: '#2a3040', head: 'helm', weapon: 'sword', shield: '#4a5a78', eyes: '#1b1410', cape: '#2a4a7a' },
   icehuntress: { skin: '#f0d0b8', armor: '#d8e4ec', armor2: '#a8b8c6', trim: '#6aa8d8', legs: '#a8b8c6', boots: '#6a5a4a', head: 'hood', weapon: 'bow', eyes: '#2a4a6a', cape: '#e8f0f6' },
   shaman: { skin: '#b8a090', armor: '#6a5a8a', armor2: '#4a3e66', trim: '#9fe7ff', legs: '#4a3e66', boots: '#2a2030', head: 'horned', robe: 1, weapon: 'staff', orb: '#9fe7ff', eyes: '#1b1410' },
   blacksmith: { skin: '#b07a5a', armor: '#3a3030', armor2: '#2a2020', trim: '#ff7a2a', legs: '#2a2020', boots: '#1a1010', head: 'none', hair: '#1a1010', beard: 1, weapon: 'axe' },
@@ -2423,6 +2618,9 @@ const QNPCS = {
   ice: [
     { id: 'snizhana', n: 'Мисливиця Сніжана', look: 'icehuntress', dx: -110, dy: -12, greet: 'Тихо. Йєті чують навіть дихання.' },
     { id: 'kholod', n: 'Шаман Холод', look: 'shaman', dx: 112, dy: -12, greet: 'Лід пам\'ятає, що зробив Ардан. Я можу дати тобі послухати.' }],
+  fortress: [
+    { id: 'varta', n: L2('Лицар Вартослав', 'Лицар-відступник Іній'), look: 'frostknight', dx: -110, dy: -12, greet: L2('Фортеця впала за одну ніч. Я — останній з її варти.', 'Колись я служив Личу. Тепер хочу побачити, як він розсиплеться.') },
+    { id: 'zoryana', n: 'Відьма Зоряна', look: 'shaman', dx: 112, dy: -12, greet: 'Тут навіть сніг шепоче. Прислухайся — і почуєш, як Лич рахує живих.' }],
   volcano: [
     { id: 'horn', n: 'Коваль-відступник Горн', look: 'blacksmith', dx: -110, dy: -12, greet: 'Колись я кував для короля. Тепер кую проти нього.' },
     { id: 'popel', n: 'Відьма Попелиця', look: 'ashwitch', dx: 112, dy: -12, greet: 'Полум\'я говорить. Хочеш почути, що воно каже про тебе?' }],
@@ -2564,6 +2762,31 @@ const QUESTS = [
   { id: 'ic4', map: 'ice', giver: 'elder', lvl: 24, req: ['ic3'], t: 'Крижаний Велетень',
     story: ['Велетень охороняє Серце Зими. Ардан розбудив його, а потім залишив.', 'Здолай його — і дізнаємось, куди пішов король.'],
     obj: [{ k: 'kill', type: 'frostGiant', n: 1, z: 'arena', boss: 1 }], done: 'Серце Зими розбите. Ардан не заморозив смерть... і пішов у вогонь. У Вулканічну Пустку.', rw: { item: 3 } },
+  { id: 'ic5', map: 'ice', giver: 'kholod', lvl: 20, req: ['ic2'], t: 'Крижана Фортеця',
+    story: ['Серця, які ти приніс, тягнуться на схід. Там, за перевалом, стоїть Крижана Фортеця.', 'Ардан збудував її, щоб берегти Серце Зими. Тепер там панує Лич. Портал на сході — дійди до фортечного табору.'],
+    obj: [{ k: 'explore', z: 'p2', r: 4, label: 'Портал на сході' }], done: 'Іди. І не дивись Личу в очі.' },
+  // --- Крижана Фортеця
+  { id: 'fo1', map: 'fortress', giver: 'varta', lvl: 20, t: 'Вовки біля табору',
+    story: ['Крижані вовки на заході чують тепло нашого вогнища.', 'Вбий вісьмох, поки зграя не напала вночі.'],
+    obj: [{ k: 'kill', type: 'iceWolf', n: 8, z: 0 }], done: 'Тепер можна спати хоч одним оком.' },
+  { id: 'fo2', map: 'fortress', giver: 'zoryana', lvl: 21, t: 'Кістки під снігом',
+    story: ['У руїнах на півночі встають мертві — і скелети, і обморожені мерці.', 'Упокой їх десятеро. Лич тягне з них силу.'],
+    obj: [{ k: 'kill', type: 'frostSkel', n: 6, z: 1 }, { k: 'kill', type: 'frostUndead', n: 4, z: 1 }], done: 'Шепіт стих. Лич щойно став трохи слабшим.' },
+  { id: 'fo3', map: 'fortress', giver: 'varta', lvl: 22, req: ['fo1'], t: 'Три мости',
+    story: ['Через прірву ведуть три мости. Перевір середній — чи він ще тримає.', 'Без мосту ми не дійдемо до цитаделі.'],
+    obj: [{ k: 'explore', z: 'bridge', r: 4, label: 'Середній міст' }], done: 'Тримає? Добре. Значить, шлях на схід відкритий.' },
+  { id: 'fo4', map: 'fortress', giver: 'zoryana', lvl: 23, t: 'Пір\'я гарпій',
+    story: ['Гарпії над прірвою на південному сході мають пір\'я, яке не тане.', 'Принеси п\'ять пір\'їн — я сплету оберіг від холоду Лича.'],
+    obj: [{ k: 'collect', item: 'Пір\'я гарпії', icon: '🪶', from: ['harpy'], ch: .45, n: 5, z: 2 }], done: 'Легке, як сніг, і холодне, як смерть. Оберіг готовий.', rw: { item: 3 } },
+  { id: 'fo5', map: 'fortress', giver: 'varta', lvl: 25, req: ['fo3'], t: 'Гірські тролі',
+    story: ['На сході засіли тролі. Вони трощать усе, що йде дорогою до брами.', 'Шестеро — і дорога вільна.'],
+    obj: [{ k: 'kill', type: 'troll', n: 6, z: 3 }], done: 'Шкура в них, як камінь. Але ти впорався.' },
+  { id: 'fo6', map: 'fortress', giver: 'varta', lvl: 26, req: ['fo3'], t: 'Варта біля брами',
+    story: ['Мої колишні побратими стоять біля брами — мертві, але вірні Личу.', 'Звільни вісьмох. Вони заслужили спокій.'],
+    obj: [{ k: 'kill', type: 'frostGuard', n: 8, z: 4 }], done: 'Дякую. Вони нарешті зійшли з посту.' },
+  { id: 'fo7', map: 'fortress', giver: 'elder', lvl: 28, req: ['fo5', 'fo6'], t: 'Лич Крижаної Фортеці',
+    story: L2(['Лич був придворним магом Ардана. Він заморозив власне серце, щоб жити вічно.', 'Цитадель на північному сході. Знищ його — і фортеця знову стане нашою.'], ['Лич — перший, кого Ардан підняв з мертвих. Він вважає себе нашим королем.', 'Покажи йому, що в Нежиті немає королів. Цитадель на північному сході.']),
+    obj: [{ k: 'kill', type: 'lich', n: 1, z: 'arena', boss: 1 }], done: 'Лич розсипався на іній. Над фортецею вперше за століття зійшов світанок.', rw: { item: 3 } },
   // --- Вулканічна Пустка
   { id: 'vo1', map: 'volcano', giver: 'horn', lvl: 21, t: 'Біси в пустці',
     story: ['Біси на заході розносять полум\'я Порчі.', 'Знищ десятьох, щоб моя кузня охолола хоч трохи.'],
@@ -2950,5 +3173,5 @@ function openNet() {
 // ============ boot ============
 resize(); buildSprites(); buildSprites2(); buildSprites3(); loadMap('cursed'); refreshTitle();
 requestAnimationFrame(frame);
-window.__game = { NET, QUESTS, QBY, get npcs() { return npcs; }, openNpc, qAccept, qTurnIn, openJournal, get P() { return P; }, allies, dentrs, objs, enterDungeon, exitDungeon, openInventory, makeItem, addItem, recalc, get dsel() { return dsel; }, get M() { return M; }, portals, changeMap, enemies, useSkill, worldTap, get state() { return state; } };
+window.__game = { findPath, fReady, FOBJ, MAPS, zoneAt,  NET, QUESTS, QBY, get npcs() { return npcs; }, openNpc, qAccept, qTurnIn, openJournal, get P() { return P; }, allies, dentrs, objs, enterDungeon, exitDungeon, openInventory, makeItem, addItem, recalc, get dsel() { return dsel; }, get M() { return M; }, portals, changeMap, enemies, useSkill, worldTap, get state() { return state; } };
 })();
